@@ -9,7 +9,24 @@ export type OrderStatus =
   | 'Return In Transit'
   | 'Returned';
 
+export type ReturnTypeVal = 'RVP' | 'RTO';
 export type ReturnCondition = 'Good' | 'Damaged';
+
+export interface SpfClaim {
+  id: string;
+  date: string;
+  amount: number;
+  orderId?: string;
+  note: string;
+  status: 'Approved' | 'Pending' | 'Rejected';
+}
+
+export interface MiscCost {
+  id: string;
+  date: string;
+  amount: number;
+  note: string;
+}
 
 export interface ManualOrder {
   id: string;
@@ -23,6 +40,7 @@ export interface ManualOrder {
   returnDurationDays: number;
   status: OrderStatus;
   returnCondition: ReturnCondition; // only meaningful when status is Returned
+  returnType?: ReturnTypeVal;       // RVP (Reverse Pickup) or RTO (Return to Origin)
   reverseShippingFee: number;       // fee charged for return shipment
 }
 
@@ -56,6 +74,9 @@ export interface TrackerMetrics {
   // Chart data
   revenueTrend: Array<{ name: string; revenue: number; profit: number }>;
   feeBreakdown: Array<{ name: string; value: number }>;
+  // Additional tracking
+  totalSpfApprovedAmount: number;
+  totalMiscCosts: number;
 }
 
 const STORAGE_KEY = 'flipkart_seller_manual_orders';
@@ -99,6 +120,8 @@ function getEffectiveStatus(order: ManualOrder): OrderStatus {
 
 export function useManualTracker() {
   const [orders, setOrders] = useState<ManualOrder[]>([]);
+  const [spfClaims, setSpfClaims] = useState<SpfClaim[]>([]);
+  const [miscCosts, setMiscCosts] = useState<MiscCost[]>([]);
   const [isLoaded, setIsLoaded] = useState(false);
 
   useEffect(() => {
@@ -111,10 +134,17 @@ export function useManualTracker() {
           ...o,
           shippingFee: o.shippingFee ?? 0,
           returnCondition: o.returnCondition || 'Good',
+          returnType: o.returnType || 'RVP',
           reverseShippingFee: o.reverseShippingFee ?? 0,
         }));
         setOrders(migrated);
       }
+
+      const storedSpf = localStorage.getItem(STORAGE_KEY + '_spf');
+      if (storedSpf) setSpfClaims(JSON.parse(storedSpf));
+
+      const storedMisc = localStorage.getItem(STORAGE_KEY + '_misc');
+      if (storedMisc) setMiscCosts(JSON.parse(storedMisc));
     } catch {
       // Ignored
     }
@@ -124,8 +154,10 @@ export function useManualTracker() {
   useEffect(() => {
     if (isLoaded) {
       localStorage.setItem(STORAGE_KEY, JSON.stringify(orders));
+      localStorage.setItem(STORAGE_KEY + '_spf', JSON.stringify(spfClaims));
+      localStorage.setItem(STORAGE_KEY + '_misc', JSON.stringify(miscCosts));
     }
-  }, [orders, isLoaded]);
+  }, [orders, spfClaims, miscCosts, isLoaded]);
 
   const addOrder = useCallback((order: Omit<ManualOrder, 'id'>) => {
     const newOrder: ManualOrder = {
@@ -143,6 +175,11 @@ export function useManualTracker() {
           // When switching away from Returned, reset return-specific fields
           if (updates.status && updates.status !== 'Returned' && updates.status !== 'Return In Transit') {
             updated.returnCondition = 'Good';
+            updated.returnType = 'RVP';
+            updated.reverseShippingFee = 0;
+          }
+          // If switching to RTO, force reverse shipping fee to 0
+          if (updated.returnType === 'RTO') {
             updated.reverseShippingFee = 0;
           }
           return updated;
@@ -171,6 +208,42 @@ export function useManualTracker() {
     });
   }, []);
 
+  const importData = useCallback((payload: { orders?: ManualOrder[], spfClaims?: SpfClaim[], miscCosts?: MiscCost[] }) => {
+    if (payload.orders && payload.orders.length > 0) {
+      importOrders(payload.orders);
+    }
+    if (payload.spfClaims && payload.spfClaims.length > 0) {
+      setSpfClaims((prev) => {
+        const existingMap = new Map(prev.map((c) => [c.id, c]));
+        payload.spfClaims!.forEach((c) => existingMap.set(c.id, c));
+        return Array.from(existingMap.values());
+      });
+    }
+    if (payload.miscCosts && payload.miscCosts.length > 0) {
+      setMiscCosts((prev) => {
+        const existingMap = new Map(prev.map((c) => [c.id, c]));
+        payload.miscCosts!.forEach((c) => existingMap.set(c.id, c));
+        return Array.from(existingMap.values());
+      });
+    }
+  }, [importOrders]);
+
+  const addSpfClaim = useCallback((claim: Omit<SpfClaim, 'id'>) => {
+    setSpfClaims((prev) => [{ ...claim, id: `spf_${Date.now()}` }, ...prev]);
+  }, []);
+
+  const deleteSpfClaim = useCallback((id: string) => {
+    setSpfClaims((prev) => prev.filter((c) => c.id !== id));
+  }, []);
+
+  const addMiscCost = useCallback((cost: Omit<MiscCost, 'id'>) => {
+    setMiscCosts((prev) => [{ ...cost, id: `misc_${Date.now()}` }, ...prev]);
+  }, []);
+
+  const deleteMiscCost = useCallback((id: string) => {
+    setMiscCosts((prev) => prev.filter((c) => c.id !== id));
+  }, []);
+
   const metrics = useMemo<TrackerMetrics>(() => {
     let grossRevenue = 0;
     let securedProfit = 0;
@@ -191,8 +264,19 @@ export function useManualTracker() {
     let returnPeriodOngoingOrders = 0;
     let securedOrders = 0;
 
-    // For charting — group by product name
-    const productMap = new Map<string, { revenue: number; profit: number }>();
+    let totalSpfApprovedAmount = 0;
+    let totalMiscCosts = 0;
+
+    spfClaims.forEach((c) => {
+      if (c.status === 'Approved') totalSpfApprovedAmount += c.amount;
+    });
+
+    miscCosts.forEach((c) => {
+      totalMiscCosts += c.amount;
+    });
+
+    // For charting — group by order date
+    const dateMap = new Map<string, { revenue: number; profit: number }>();
 
     orders.forEach((order) => {
       const effectiveStatus = getEffectiveStatus(order);
@@ -200,7 +284,11 @@ export function useManualTracker() {
 
       if (effectiveStatus === 'Returned') {
         returnedOrders++;
-        reverseShippingTotal += order.reverseShippingFee;
+        
+        // RTO has no reverse shipping fee
+        const effectiveReverseFee = order.returnType === 'RTO' ? 0 : order.reverseShippingFee;
+        
+        reverseShippingTotal += effectiveReverseFee;
         forwardShippingTotal += order.shippingFee;
 
         if (order.returnCondition === 'Good') {
@@ -209,7 +297,7 @@ export function useManualTracker() {
           // • NO revenue, NO GST, NO investment cost (product is back with seller)
           // • Only losses = forward shipping fee + reverse shipping fee
           returnedGoodOrders++;
-          const goodLoss = order.shippingFee + order.reverseShippingFee;
+          const goodLoss = order.shippingFee + effectiveReverseFee;
           returnSellableLosses += goodLoss;
           returnLosses += goodLoss;
         } else {
@@ -220,7 +308,7 @@ export function useManualTracker() {
           // • Losses = costPrice + forward shipping fee + reverse shipping fee
           returnedDamagedOrders++;
           investmentCost += order.costPrice;
-          const damagedLoss = order.costPrice + order.shippingFee + order.reverseShippingFee;
+          const damagedLoss = order.costPrice + order.shippingFee + effectiveReverseFee;
           returnDamagedLosses += damagedLoss;
           returnLosses += damagedLoss;
         }
@@ -238,10 +326,10 @@ export function useManualTracker() {
         const profit = order.settlementPrice - order.costPrice;
         securedProfit += profit;
 
-        const existing = productMap.get(order.productName) || { revenue: 0, profit: 0 };
+        const existing = dateMap.get(order.orderDate) || { revenue: 0, profit: 0 };
         existing.revenue += order.sellingPrice;
         existing.profit += profit;
-        productMap.set(order.productName, existing);
+        dateMap.set(order.orderDate, existing);
 
       } else if (effectiveStatus === 'Return Period Ongoing') {
         // Delivered but return window still open — at risk
@@ -253,10 +341,10 @@ export function useManualTracker() {
         const profit = order.settlementPrice - order.costPrice;
         atRiskProfit += profit;
 
-        const existing = productMap.get(order.productName) || { revenue: 0, profit: 0 };
+        const existing = dateMap.get(order.orderDate) || { revenue: 0, profit: 0 };
         existing.revenue += order.sellingPrice;
         existing.profit += profit;
-        productMap.set(order.productName, existing);
+        dateMap.set(order.orderDate, existing);
 
       } else if (effectiveStatus === 'In Transit') {
         inTransitOrders++;
@@ -270,12 +358,12 @@ export function useManualTracker() {
       } else if (effectiveStatus === 'Return In Transit') {
         returnInTransitOrders++;
         forwardShippingTotal += order.shippingFee;
-        // Don't add GST — return is in progress, sale may be cancelled
-        // Don't add to investmentCost yet — depends on return condition
-        // Return is in progress — we don't know condition yet
-        // Treat as potential loss (at minimum shipping fees)
-        reverseShippingTotal += order.reverseShippingFee;
-        const pendingLoss = order.shippingFee + order.reverseShippingFee;
+        
+        // RTO has no reverse shipping fee
+        const effectiveReverseFee = order.returnType === 'RTO' ? 0 : order.reverseShippingFee;
+        reverseShippingTotal += effectiveReverseFee;
+        
+        const pendingLoss = order.shippingFee + effectiveReverseFee;
         returnLosses += pendingLoss;
       }
     });
@@ -286,15 +374,19 @@ export function useManualTracker() {
     const totalFulfilledOrders = deliveredOrders + returnedOrders + returnPeriodOngoingOrders;
     const returnRate = totalFulfilledOrders > 0 ? (returnedOrders / totalFulfilledOrders) * 100 : 0;
 
-    // Build revenue trend data (top products by revenue)
-    const revenueTrend = Array.from(productMap.entries())
-      .sort((a, b) => b[1].revenue - a[1].revenue)
-      .slice(0, 8)
-      .map(([name, data]) => ({
-        name: name.length > 15 ? name.substring(0, 15) + '…' : name,
-        revenue: data.revenue,
-        profit: data.profit,
-      }));
+    // Build revenue trend data (daily basis)
+    const revenueTrend = Array.from(dateMap.entries())
+      .sort((a, b) => new Date(a[0]).getTime() - new Date(b[0]).getTime())
+      .slice(-14) // Limit to last 14 days of data to keep graph readable
+      .map(([name, data]) => {
+        const dateObj = new Date(name);
+        const formattedDate = dateObj.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+        return {
+          name: formattedDate,
+          revenue: data.revenue,
+          profit: data.profit,
+        };
+      });
 
     // Build fee breakdown
     const feeBreakdown = [
@@ -333,17 +425,26 @@ export function useManualTracker() {
       returnRate,
       revenueTrend: revenueTrend.length ? revenueTrend : [{ name: 'No data', revenue: 0, profit: 0 }],
       feeBreakdown,
+      totalSpfApprovedAmount,
+      totalMiscCosts,
     };
-  }, [orders]);
+  }, [orders, spfClaims, miscCosts]);
 
   return {
     orders,
+    spfClaims,
+    miscCosts,
     isLoaded,
     metrics,
     addOrder,
     updateOrder,
     deleteOrder,
     importOrders,
+    importData,
+    addSpfClaim,
+    deleteSpfClaim,
+    addMiscCost,
+    deleteMiscCost,
     getEffectiveStatus: (order: ManualOrder) => getEffectiveStatus(order),
     getDaysLeft: (order: ManualOrder) => getDaysLeft(order),
     isReturnPeriodPassed: (order: ManualOrder) => isReturnPeriodPassed(order),

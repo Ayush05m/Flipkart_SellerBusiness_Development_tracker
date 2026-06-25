@@ -18,7 +18,7 @@ export function ProfitTrendChart({ data }: ProfitTrendChartProps) {
     <div className="chart-card glass-panel animate-fade-in" style={{ animationDelay: '0.1s' }}>
       <div className="chart-header">
         <h3 className="chart-title">Revenue vs Actual Profit</h3>
-        <p className="chart-subtitle">Product-wise top-line vs bottom-line</p>
+        <p className="chart-subtitle">Daily top-line vs bottom-line (Last 14 Days)</p>
       </div>
 
       <div className="chart-wrapper">

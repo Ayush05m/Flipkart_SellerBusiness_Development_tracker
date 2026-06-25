@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useMemo, useRef, ChangeEvent } from 'react';
+import React, { useState, useMemo, ChangeEvent } from 'react';
 import {
   Plus,
   Trash2,
@@ -18,7 +18,9 @@ import {
   Download,
   Upload,
 } from 'lucide-react';
-import { ManualOrder, OrderStatus, ReturnCondition, useManualTracker } from '../../lib/manualTrackerStore';
+import { ManualOrder, OrderStatus, ReturnCondition, ReturnTypeVal, useManualTracker } from '../../lib/manualTrackerStore';
+import { Modal } from '../UI/Modal';
+import { Sheet } from '../UI/Sheet';
 
 interface TrackerTableProps {
   store: ReturnType<typeof useManualTracker>;
@@ -35,7 +37,6 @@ function formatCurrency(amount: number) {
 const STATUS_OPTIONS: OrderStatus[] = [
   'In Transit',
   'Delivered',
-  'Return Period Ongoing',
   'Return In Transit',
   'Returned',
 ];
@@ -84,13 +85,22 @@ const EMPTY_NEW_ORDER: Omit<ManualOrder, 'id'> = {
   returnDurationDays: 10,
   status: 'In Transit',
   returnCondition: 'Good',
+  returnType: 'RVP',
   reverseShippingFee: 0,
 };
 
 export function TrackerTable({ store }: TrackerTableProps) {
-  const { orders, addOrder, updateOrder, deleteOrder, importOrders, getEffectiveStatus, getDaysLeft } = store;
+  const { orders, addOrder, updateOrder, deleteOrder, importData, getEffectiveStatus, getDaysLeft, spfClaims, miscCosts } = store;
+  
+  // Modal & Sheet State
   const [isAdding, setIsAdding] = useState(false);
+  const [isSheetOpen, setIsSheetOpen] = useState(false);
+  const [selectedOrder, setSelectedOrder] = useState<ManualOrder | null>(null);
+  
+  // Form State
   const [newOrder, setNewOrder] = useState<Omit<ManualOrder, 'id'>>(EMPTY_NEW_ORDER);
+  const [editOrder, setEditOrder] = useState<ManualOrder | null>(null);
+
   const [filterStatus, setFilterStatus] = useState<OrderStatus | 'All'>('All');
   const [searchQuery, setSearchQuery] = useState('');
   const [importMessage, setImportMessage] = useState('');
@@ -111,24 +121,26 @@ export function TrackerTable({ store }: TrackerTableProps) {
     setNewOrder(EMPTY_NEW_ORDER);
   };
 
-  const handleStatusChange = (orderId: string, order: ManualOrder, newStatus: OrderStatus) => {
-    // When marking as Delivered, prompt for delivery date
-    if (newStatus === 'Delivered' || newStatus === 'Return Period Ongoing') {
-      const today = new Date().toISOString().split('T')[0];
-      const deliveryDate = prompt(
-        'Enter the delivery date (YYYY-MM-DD):',
-        order.deliveryDate || today
-      );
-      if (deliveryDate === null) return; // User cancelled
-      // Validate date format
-      const parsed = new Date(deliveryDate);
-      if (isNaN(parsed.getTime())) {
-        alert('Invalid date format. Please use YYYY-MM-DD.');
-        return;
-      }
-      updateOrder(orderId, { status: newStatus, deliveryDate });
-    } else {
-      updateOrder(orderId, { status: newStatus });
+  const handleEditSubmit = () => {
+    if (!editOrder || !editOrder.productName) return;
+    updateOrder(editOrder.id, editOrder);
+    setIsSheetOpen(false);
+    setEditOrder(null);
+    setSelectedOrder(null);
+  };
+
+  const handleRowClick = (order: ManualOrder) => {
+    setSelectedOrder(order);
+    setEditOrder(order);
+    setIsSheetOpen(true);
+  };
+
+  const handleDelete = (id: string) => {
+    if (confirm('Are you sure you want to delete this order?')) {
+      deleteOrder(id);
+      setIsSheetOpen(false);
+      setEditOrder(null);
+      setSelectedOrder(null);
     }
   };
 
@@ -138,7 +150,13 @@ export function TrackerTable({ store }: TrackerTableProps) {
   // ── Export / Import ──────────────────────────────────────
 
   const handleExport = () => {
-    const blob = new Blob([JSON.stringify(orders, null, 2)], { type: 'application/json' });
+    const payload = {
+      version: 1,
+      orders,
+      spfClaims,
+      miscCosts,
+    };
+    const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
@@ -148,7 +166,6 @@ export function TrackerTable({ store }: TrackerTableProps) {
     document.body.removeChild(a);
     URL.revokeObjectURL(url);
   };
-
 
   const handleImportFile = async (file: File) => {
     setImportMessage('Reading file…');
@@ -160,7 +177,7 @@ export function TrackerTable({ store }: TrackerTableProps) {
         reader.readAsText(file);
       });
 
-      let parsed: unknown;
+      let parsed: any;
       try {
         parsed = JSON.parse(text);
       } catch {
@@ -168,13 +185,25 @@ export function TrackerTable({ store }: TrackerTableProps) {
         return;
       }
 
-      if (!Array.isArray(parsed)) {
-        setImportMessage('Invalid file — expected a JSON array of orders.');
+      let rawOrders: any[] = [];
+      let rawSpf: any[] = [];
+      let rawMisc: any[] = [];
+
+      if (Array.isArray(parsed)) {
+        // Legacy fallback
+        rawOrders = parsed;
+      } else if (parsed && typeof parsed === 'object') {
+        // Unified format
+        rawOrders = Array.isArray(parsed.orders) ? parsed.orders : [];
+        rawSpf = Array.isArray(parsed.spfClaims) ? parsed.spfClaims : [];
+        rawMisc = Array.isArray(parsed.miscCosts) ? parsed.miscCosts : [];
+      } else {
+        setImportMessage('Invalid file format.');
         return;
       }
 
-      // Validate & migrate each row
-      const imported: ManualOrder[] = (parsed as any[])
+      // Validate & migrate each order row
+      const finalOrders: ManualOrder[] = rawOrders
         .filter((row: any) => row && typeof row === 'object' && row.productName)
         .map((row: any) => ({
           id: row.id || `mt_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
@@ -190,17 +219,36 @@ export function TrackerTable({ store }: TrackerTableProps) {
           returnCondition: (['Good', 'Damaged'] as ReturnCondition[]).includes(row.returnCondition)
             ? row.returnCondition
             : 'Good',
-          reverseShippingFee: Number(row.reverseShippingFee) || 0,
+          returnType: row.returnType === 'RTO' ? 'RTO' : 'RVP',
+          reverseShippingFee: row.returnType === 'RTO' ? 0 : (Number(row.reverseShippingFee) || 0),
         }));
 
-      if (!imported.length) {
-        setImportMessage('No valid orders found in the file.');
-        alert('No valid orders found in the file.');
+      // Validate SPF and Misc
+      const finalSpf = rawSpf.filter(c => c && c.productName && c.amount).map(c => ({
+        id: c.id || `spf_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
+        productName: String(c.productName),
+        amount: Number(c.amount) || 0,
+        status: (['Pending', 'Approved', 'Rejected'] as any[]).includes(c.status) ? c.status : 'Pending',
+        date: String(c.date || new Date().toISOString().split('T')[0]),
+        note: String(c.note || '')
+      }));
+
+      const finalMisc = rawMisc.filter(c => c && c.description && c.amount).map(c => ({
+        id: c.id || `misc_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
+        description: String(c.description),
+        amount: Number(c.amount) || 0,
+        date: String(c.date || new Date().toISOString().split('T')[0]),
+        note: String(c.note || '')
+      }));
+
+      if (!finalOrders.length && !finalSpf.length && !finalMisc.length) {
+        setImportMessage('No valid data found in the file.');
+        alert('No valid data found in the file.');
         return;
       }
 
-      importOrders(imported);
-      const successMsg = `✓ Imported ${imported.length} order${imported.length !== 1 ? 's' : ''} from "${file.name}"`;
+      importData({ orders: finalOrders, spfClaims: finalSpf, miscCosts: finalMisc });
+      const successMsg = `✓ Imported ${finalOrders.length} orders, ${finalSpf.length} claims, ${finalMisc.length} costs.`;
       setImportMessage(successMsg);
       alert(successMsg); // explicit fallback so we know it worked
       setTimeout(() => setImportMessage(''), 6000);
@@ -328,6 +376,165 @@ export function TrackerTable({ store }: TrackerTableProps) {
     return { inTransit, returnWindow, secured, returned, returnInTransit };
   }, [orders, getEffectiveStatus]);
 
+  // Form field renderer for reuse in Modal and Sheet
+  const renderOrderForm = (orderState: Partial<ManualOrder>, onChange: (updates: Partial<ManualOrder>) => void) => (
+    <div className="flex-col gap-3" style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
+      <div className="form-group" style={{ display: 'flex', flexDirection: 'column', gap: '0.25rem' }}>
+        <label style={{ fontSize: '0.875rem', color: 'var(--text-secondary)' }}>Product Name</label>
+        <input
+          type="text"
+          className="cp-input-wrapper"
+          style={{ width: '100%', padding: '0.5rem', color: 'white', border: '1px solid var(--border-color)', borderRadius: '6px', background: 'var(--bg-tertiary)' }}
+          placeholder="e.g. Wireless Mouse"
+          value={orderState.productName || ''}
+          onChange={(e) => onChange({ productName: e.target.value })}
+        />
+      </div>
+
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1rem' }}>
+        <div className="form-group" style={{ display: 'flex', flexDirection: 'column', gap: '0.25rem' }}>
+          <label style={{ fontSize: '0.875rem', color: 'var(--text-secondary)' }}>Order Date</label>
+          <input
+            type="date"
+            className="cp-input-wrapper"
+            style={{ width: '100%', padding: '0.5rem', color: 'white', border: '1px solid var(--border-color)', borderRadius: '6px', background: 'var(--bg-tertiary)' }}
+            value={orderState.orderDate || ''}
+            onChange={(e) => onChange({ orderDate: e.target.value })}
+          />
+        </div>
+        <div className="form-group" style={{ display: 'flex', flexDirection: 'column', gap: '0.25rem' }}>
+          <label style={{ fontSize: '0.875rem', color: 'var(--text-secondary)' }}>Delivery Date (Optional)</label>
+          <input
+            type="date"
+            className="cp-input-wrapper"
+            style={{ width: '100%', padding: '0.5rem', color: 'white', border: '1px solid var(--border-color)', borderRadius: '6px', background: 'var(--bg-tertiary)' }}
+            value={orderState.deliveryDate || ''}
+            onChange={(e) => onChange({ deliveryDate: e.target.value || undefined })}
+          />
+        </div>
+      </div>
+
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1rem' }}>
+        <div className="form-group" style={{ display: 'flex', flexDirection: 'column', gap: '0.25rem' }}>
+          <label style={{ fontSize: '0.875rem', color: 'var(--text-secondary)' }}>Cost Price (₹)</label>
+          <input
+            type="number"
+            className="cp-input-wrapper"
+            style={{ width: '100%', padding: '0.5rem', color: 'white', border: '1px solid var(--border-color)', borderRadius: '6px', background: 'var(--bg-tertiary)' }}
+            value={orderState.costPrice === 0 && !orderState.productName ? '' : orderState.costPrice}
+            onChange={(e) => onChange({ costPrice: Number(e.target.value) })}
+          />
+        </div>
+        <div className="form-group" style={{ display: 'flex', flexDirection: 'column', gap: '0.25rem' }}>
+          <label style={{ fontSize: '0.875rem', color: 'var(--text-secondary)' }}>Selling Price (₹)</label>
+          <input
+            type="number"
+            className="cp-input-wrapper"
+            style={{ width: '100%', padding: '0.5rem', color: 'white', border: '1px solid var(--border-color)', borderRadius: '6px', background: 'var(--bg-tertiary)' }}
+            value={orderState.sellingPrice === 0 && !orderState.productName ? '' : orderState.sellingPrice}
+            onChange={(e) => onChange({ sellingPrice: Number(e.target.value) })}
+          />
+        </div>
+      </div>
+
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1rem' }}>
+        <div className="form-group" style={{ display: 'flex', flexDirection: 'column', gap: '0.25rem' }}>
+          <label style={{ fontSize: '0.875rem', color: 'var(--text-secondary)' }}>Settlement (₹)</label>
+          <input
+            type="number"
+            className="cp-input-wrapper"
+            style={{ width: '100%', padding: '0.5rem', color: 'white', border: '1px solid var(--border-color)', borderRadius: '6px', background: 'var(--bg-tertiary)' }}
+            value={orderState.settlementPrice === 0 && !orderState.productName ? '' : orderState.settlementPrice}
+            onChange={(e) => onChange({ settlementPrice: Number(e.target.value) })}
+          />
+        </div>
+        <div className="form-group" style={{ display: 'flex', flexDirection: 'column', gap: '0.25rem' }}>
+          <label style={{ fontSize: '0.875rem', color: 'var(--text-secondary)' }}>Shipping Fee (₹)</label>
+          <input
+            type="number"
+            className="cp-input-wrapper"
+            style={{ width: '100%', padding: '0.5rem', color: 'white', border: '1px solid var(--border-color)', borderRadius: '6px', background: 'var(--bg-tertiary)' }}
+            value={orderState.shippingFee === 0 && !orderState.productName ? '' : orderState.shippingFee}
+            onChange={(e) => onChange({ shippingFee: Number(e.target.value) })}
+          />
+        </div>
+      </div>
+
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1rem' }}>
+        <div className="form-group" style={{ display: 'flex', flexDirection: 'column', gap: '0.25rem' }}>
+          <label style={{ fontSize: '0.875rem', color: 'var(--text-secondary)' }}>Status</label>
+          <select
+            className="tracker-status-select"
+            style={{ width: '100%', padding: '0.5rem', borderRadius: '6px' }}
+            value={orderState.status}
+            onChange={(e) => onChange({ status: e.target.value as OrderStatus })}
+          >
+            {STATUS_OPTIONS.map((s) => (
+              <option key={s} value={s}>{STATUS_CONFIG[s].label}</option>
+            ))}
+          </select>
+        </div>
+        <div className="form-group" style={{ display: 'flex', flexDirection: 'column', gap: '0.25rem' }}>
+          <label style={{ fontSize: '0.875rem', color: 'var(--text-secondary)' }}>Return Duration (Days)</label>
+          <input
+            type="number"
+            className="cp-input-wrapper"
+            style={{ width: '100%', padding: '0.5rem', color: 'white', border: '1px solid var(--border-color)', borderRadius: '6px', background: 'var(--bg-tertiary)' }}
+            value={orderState.returnDurationDays}
+            onChange={(e) => onChange({ returnDurationDays: Number(e.target.value) })}
+          />
+        </div>
+      </div>
+
+      {orderState.status && isReturnRelated(orderState.status as OrderStatus) && (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem', marginTop: '0.5rem', padding: '1rem', background: 'rgba(239, 68, 68, 0.05)', borderRadius: '8px', border: '1px dashed var(--danger)' }}>
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1rem' }}>
+            <div className="form-group" style={{ display: 'flex', flexDirection: 'column', gap: '0.25rem' }}>
+              <label style={{ fontSize: '0.875rem', color: 'var(--danger)' }}>Return Type</label>
+              <select
+                className="tracker-status-select"
+                style={{ width: '100%', padding: '0.5rem', borderRadius: '6px', borderColor: 'var(--danger)' }}
+                value={orderState.returnType || 'RVP'}
+                onChange={(e) => {
+                  const val = e.target.value as ReturnTypeVal;
+                  onChange({ returnType: val, reverseShippingFee: val === 'RTO' ? 0 : orderState.reverseShippingFee });
+                }}
+              >
+                <option value="RVP">RVP (Reverse Pickup)</option>
+                <option value="RTO">RTO (Return To Origin)</option>
+              </select>
+            </div>
+            <div className="form-group" style={{ display: 'flex', flexDirection: 'column', gap: '0.25rem' }}>
+              <label style={{ fontSize: '0.875rem', color: 'var(--danger)' }}>Return Condition</label>
+              <select
+                className="tracker-status-select"
+                style={{ width: '100%', padding: '0.5rem', borderRadius: '6px', borderColor: 'var(--danger)' }}
+                value={orderState.returnCondition}
+                onChange={(e) => onChange({ returnCondition: e.target.value as ReturnCondition })}
+              >
+                <option value="Good">Good (Sellable)</option>
+                <option value="Damaged">Damaged / Used</option>
+              </select>
+            </div>
+          </div>
+          <div className="form-group" style={{ display: 'flex', flexDirection: 'column', gap: '0.25rem' }}>
+            <label style={{ fontSize: '0.875rem', color: 'var(--danger)' }}>
+              Reverse Shipping Fee (₹) {orderState.returnType === 'RTO' && '(N/A for RTO)'}
+            </label>
+            <input
+              type="number"
+              className="cp-input-wrapper"
+              disabled={orderState.returnType === 'RTO'}
+              style={{ width: '100%', padding: '0.5rem', color: 'white', border: '1px solid var(--danger)', borderRadius: '6px', background: 'var(--bg-tertiary)', opacity: orderState.returnType === 'RTO' ? 0.5 : 1 }}
+              value={orderState.reverseShippingFee === 0 && orderState.returnType !== 'RTO' ? '' : orderState.reverseShippingFee}
+              onChange={(e) => onChange({ reverseShippingFee: Number(e.target.value) })}
+            />
+          </div>
+        </div>
+      )}
+    </div>
+  );
+
   return (
     <div className="glass-panel performance-table-container">
       <div className="table-header-section flex-between">
@@ -398,7 +605,10 @@ export function TrackerTable({ store }: TrackerTableProps) {
           <button
             className="source-pill flipkart"
             style={{ cursor: 'pointer', gap: '0.5rem' }}
-            onClick={() => setIsAdding(!isAdding)}
+            onClick={() => {
+              setNewOrder(EMPTY_NEW_ORDER);
+              setIsAdding(true);
+            }}
           >
             <Plus size={16} />
             Add Order
@@ -444,260 +654,90 @@ export function TrackerTable({ store }: TrackerTableProps) {
               <th>Product Name</th>
               <th>Order Date</th>
               <th>Delivery Date</th>
-              <th className="text-right">Cost Price (₹)</th>
-              <th className="text-right">Selling Price (₹)</th>
-              <th className="text-right">Settlement (₹)</th>
-              <th className="text-right">Ship Fee (₹)</th>
-              <th className="text-center">Return Duration</th>
               <th>Status</th>
               <th>Return Period</th>
               <th className="text-right">Profit/Loss</th>
-              <th>Actions</th>
+              <th className="text-right">Actions</th>
             </tr>
           </thead>
           <tbody>
-            {isAdding && (
-              <tr style={{ background: 'rgba(99, 102, 241, 0.08)' }}>
-                <td>
-                  <input
-                    type="text"
-                    className="cp-input"
-                    style={{ textAlign: 'left', width: '100%', minWidth: '120px' }}
-                    placeholder="e.g. Wireless Mouse"
-                    value={newOrder.productName}
-                    onChange={(e) => setNewOrder({ ...newOrder, productName: e.target.value })}
-                    autoFocus
-                  />
-                </td>
-                <td>
-                  <input
-                    type="date"
-                    className="cp-input"
-                    style={{ textAlign: 'left' }}
-                    value={newOrder.orderDate}
-                    onChange={(e) => setNewOrder({ ...newOrder, orderDate: e.target.value })}
-                  />
-                </td>
-                <td>
-                  <input
-                    type="number"
-                    className="cp-input"
-                    value={newOrder.costPrice || ''}
-                    placeholder="0"
-                    onChange={(e) => setNewOrder({ ...newOrder, costPrice: Number(e.target.value) })}
-                  />
-                </td>
-                <td>
-                  <input
-                    type="number"
-                    className="cp-input"
-                    value={newOrder.sellingPrice || ''}
-                    placeholder="0"
-                    onChange={(e) => setNewOrder({ ...newOrder, sellingPrice: Number(e.target.value) })}
-                  />
-                </td>
-                <td>
-                  <input
-                    type="number"
-                    className="cp-input"
-                    value={newOrder.settlementPrice || ''}
-                    placeholder="0"
-                    onChange={(e) => setNewOrder({ ...newOrder, settlementPrice: Number(e.target.value) })}
-                  />
-                </td>
-                <td>
-                  <input
-                    type="number"
-                    className="cp-input"
-                    value={newOrder.shippingFee || ''}
-                    placeholder="0"
-                    onChange={(e) => setNewOrder({ ...newOrder, shippingFee: Number(e.target.value) })}
-                  />
-                </td>
-                <td>
-                  <div className="flex-center gap-2">
-                    <input
-                      type="number"
-                      className="cp-input"
-                      style={{ width: '50px' }}
-                      value={newOrder.returnDurationDays}
-                      onChange={(e) => setNewOrder({ ...newOrder, returnDurationDays: Number(e.target.value) })}
-                    />
-                    <span style={{ fontSize: '0.8rem', color: 'var(--text-secondary)' }}>days</span>
-                  </div>
-                </td>
-                <td>
-                  <select
-                    className="tracker-status-select"
-                    value={newOrder.status}
-                    onChange={(e) => setNewOrder({ ...newOrder, status: e.target.value as OrderStatus })}
-                  >
-                    {STATUS_OPTIONS.map((s) => (
-                      <option key={s} value={s}>{STATUS_CONFIG[s].label}</option>
-                    ))}
-                  </select>
-                </td>
-                <td style={{ textAlign: 'center', color: 'var(--text-tertiary)' }}>—</td>
-                <td style={{ textAlign: 'center', color: 'var(--text-tertiary)' }}>—</td>
-                <td style={{ textAlign: 'center', color: 'var(--text-tertiary)' }}>—</td>
-                <td style={{ textAlign: 'center', color: 'var(--text-tertiary)' }}>—</td>
-                <td>
-                  <div className="flex-center gap-2">
-                    <button
-                      className="icon-action-btn"
-                      onClick={handleAddSubmit}
-                      style={{ color: 'var(--success)', borderColor: 'rgba(16, 185, 129, 0.3)', width: 'auto', padding: '0.25rem 0.75rem', fontSize: '0.8rem', fontWeight: 600 }}
-                    >
-                      Save
-                    </button>
-                    <button
-                      className="icon-action-btn"
-                      onClick={() => { setIsAdding(false); setNewOrder(EMPTY_NEW_ORDER); }}
-                      style={{ width: 'auto', padding: '0.25rem 0.75rem', fontSize: '0.8rem' }}
-                    >
-                      Cancel
-                    </button>
-                  </div>
-                </td>
-              </tr>
-            )}
-
             {filteredOrders.map((order) => {
               const effectiveStatus = getEffectiveStatus(order);
               const statusConfig = STATUS_CONFIG[effectiveStatus];
-              const showReturnFields = isReturnRelated(order.status);
 
               return (
-                <React.Fragment key={order.id}>
-                  <tr
-                    style={{
-                      borderLeft: `3px solid ${statusConfig.color}`,
-                    }}
-                  >
-                    <td className="font-medium">{order.productName}</td>
-                    <td style={{ color: 'var(--text-secondary)', fontSize: '0.875rem' }}>
-                      {new Date(order.orderDate).toLocaleDateString('en-IN', {
-                        day: '2-digit',
-                        month: 'short',
-                        year: 'numeric',
-                      })}
-                    </td>
-                    <td style={{ color: 'var(--text-secondary)', fontSize: '0.875rem' }}>
-                      {order.deliveryDate
-                        ? new Date(order.deliveryDate).toLocaleDateString('en-IN', {
-                            day: '2-digit',
-                            month: 'short',
-                            year: 'numeric',
-                          })
-                        : <span style={{ color: 'var(--text-tertiary)', fontStyle: 'italic' }}>—</span>
-                      }
-                    </td>
-                    <td className="text-right font-medium">₹{order.costPrice.toLocaleString('en-IN')}</td>
-                    <td className="text-right font-medium" style={{ color: 'var(--info)' }}>₹{order.sellingPrice.toLocaleString('en-IN')}</td>
-                    <td className="text-right">
-                      <div className="cp-input-wrapper" style={{ padding: '0.2rem 0.5rem' }}>
-                        <span className="currency-prefix">₹</span>
-                        <input
-                          type="number"
-                          className="cp-input"
-                          value={order.settlementPrice}
-                          onChange={(e) => updateOrder(order.id, { settlementPrice: Number(e.target.value) })}
-                        />
-                      </div>
-                    </td>
-                    <td className="text-right">
-                      <div className="cp-input-wrapper" style={{ padding: '0.2rem 0.5rem' }}>
-                        <span className="currency-prefix">₹</span>
-                        <input
-                          type="number"
-                          className="cp-input"
-                          value={order.shippingFee}
-                          onChange={(e) => updateOrder(order.id, { shippingFee: Number(e.target.value) })}
-                        />
-                      </div>
-                    </td>
-                    <td className="text-center" style={{ fontSize: '0.875rem' }}>
-                      {order.returnDurationDays} days
-                    </td>
-                    <td>
-                      <select
-                        className="tracker-status-select"
-                        value={order.status}
-                        onChange={(e) => handleStatusChange(order.id, order, e.target.value as OrderStatus)}
-                        style={{
-                          color: statusConfig.color,
-                          borderColor: statusConfig.color,
-                          background: statusConfig.bg,
-                        }}
-                      >
-                        {STATUS_OPTIONS.map((s) => (
-                          <option key={s} value={s} style={{ color: 'var(--text-primary)', background: 'var(--bg-secondary)' }}>
-                            {STATUS_CONFIG[s].label}
-                          </option>
-                        ))}
-                      </select>
-
-                      {/* Return sub-fields: condition + reverse shipping */}
-                      {showReturnFields && (
-                        <div className="return-subfields">
-                          {order.status === 'Returned' && (
-                            <select
-                              className="tracker-status-select"
-                              value={order.returnCondition}
-                              onChange={(e) => updateOrder(order.id, { returnCondition: e.target.value as ReturnCondition })}
-                              style={{
-                                fontSize: '0.72rem',
-                                minWidth: '100px',
-                                color: order.returnCondition === 'Good' ? 'var(--success)' : 'var(--danger)',
-                                borderColor: order.returnCondition === 'Good' ? 'var(--success)' : 'var(--danger)',
-                                background: order.returnCondition === 'Good' ? 'rgba(16,185,129,0.1)' : 'rgba(239,68,68,0.1)',
-                              }}
-                            >
-                              <option value="Good" style={{ color: 'var(--text-primary)', background: 'var(--bg-secondary)' }}>
-                                Good (Sellable)
-                              </option>
-                              <option value="Damaged" style={{ color: 'var(--text-primary)', background: 'var(--bg-secondary)' }}>
-                                Damaged / Used
-                              </option>
-                            </select>
-                          )}
-                          <div className="cp-input-wrapper" style={{ padding: '0.15rem 0.4rem', marginTop: '0.35rem' }}>
-                            <span className="currency-prefix" style={{ fontSize: '0.72rem' }}>₹</span>
-                            <input
-                              type="number"
-                              className="cp-input"
-                              style={{ fontSize: '0.78rem' }}
-                              placeholder="Reverse ship fee"
-                              value={order.reverseShippingFee || ''}
-                              onChange={(e) => updateOrder(order.id, { reverseShippingFee: Number(e.target.value) })}
-                            />
-                          </div>
-                          <span style={{ fontSize: '0.65rem', color: 'var(--text-tertiary)', marginTop: '0.15rem' }}>
-                            reverse shipping ↑
+                <tr
+                  key={order.id}
+                  onClick={() => handleRowClick(order)}
+                  style={{
+                    borderLeft: `3px solid ${statusConfig.color}`,
+                    cursor: 'pointer',
+                  }}
+                  className="hover-row"
+                >
+                  <td className="font-medium">{order.productName}</td>
+                  <td style={{ color: 'var(--text-secondary)', fontSize: '0.875rem' }}>
+                    {new Date(order.orderDate).toLocaleDateString('en-IN', {
+                      day: '2-digit',
+                      month: 'short',
+                      year: 'numeric',
+                    })}
+                  </td>
+                  <td onClick={(e) => e.stopPropagation()}>
+                    <input
+                      type="date"
+                      className="cp-input-wrapper"
+                      style={{ padding: '0.25rem 0.5rem', borderRadius: '4px', border: '1px solid var(--border-color)', background: 'transparent', color: 'white', fontSize: '0.8rem' }}
+                      value={order.deliveryDate || ''}
+                      onChange={(e) => updateOrder(order.id, { deliveryDate: e.target.value || undefined })}
+                    />
+                  </td>
+                  <td>
+                    <span style={{ color: statusConfig.color, fontWeight: 600, fontSize: '0.875rem' }}>
+                      {STATUS_CONFIG[order.status].label}
+                    </span>
+                  </td>
+                  <td>
+                    {getReturnStatusBadge(order)}
+                    {isReturnRelated(effectiveStatus as OrderStatus) && (
+                      <div className="return-subfields">
+                        <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.75rem', color: 'var(--text-secondary)' }}>
+                          <span>Type:</span>
+                          <span style={{ color: 'var(--text-primary)', fontWeight: 600 }}>{order.returnType || 'RVP'}</span>
+                        </div>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.75rem', color: 'var(--text-secondary)', marginTop: '0.15rem' }}>
+                          <span>Condition:</span>
+                          <span style={{ color: order.returnCondition === 'Good' ? 'var(--success)' : 'var(--danger)', fontWeight: 600 }}>
+                            {order.returnCondition === 'Good' ? 'Sellable' : 'Damaged'}
                           </span>
                         </div>
-                      )}
-                    </td>
-                    <td>{getReturnStatusBadge(order)}</td>
-                    <td className="text-right">{getOrderProfitBadge(order)}</td>
-                    <td>
-                      <button
-                        className="icon-action-btn"
-                        onClick={() => deleteOrder(order.id)}
-                        title="Delete Order"
-                        style={{ color: 'var(--text-tertiary)' }}
-                      >
-                        <Trash2 size={16} />
-                      </button>
-                    </td>
-                  </tr>
-                </React.Fragment>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.75rem', color: 'var(--text-secondary)', marginTop: '0.15rem' }}>
+                          <span>Rev Ship:</span>
+                          <span style={{ color: 'var(--text-primary)', fontWeight: 600 }}>
+                            {order.returnType === 'RTO' ? '₹0' : formatCurrency(order.reverseShippingFee)}
+                          </span>
+                        </div>
+                      </div>
+                    )}
+                  </td>
+                  <td className="text-right">{getOrderProfitBadge(order)}</td>
+                  <td className="text-right" onClick={(e) => e.stopPropagation()}>
+                    <button
+                      className="icon-action-btn"
+                      onClick={() => handleDelete(order.id)}
+                      title="Delete Order"
+                      style={{ width: '30px', height: '30px' }}
+                    >
+                      <Trash2 size={14} className="text-danger" />
+                    </button>
+                  </td>
+                </tr>
               );
             })}
 
-            {filteredOrders.length === 0 && !isAdding && (
+            {filteredOrders.length === 0 && (
               <tr>
-                <td colSpan={12} style={{ textAlign: 'center', padding: '3rem', color: 'var(--text-tertiary)' }}>
+                <td colSpan={7} style={{ textAlign: 'center', padding: '3rem', color: 'var(--text-tertiary)' }}>
                   {orders.length === 0
                     ? 'No orders yet. Click "Add Order" to start tracking manually.'
                     : 'No orders match your current filter.'}
@@ -707,6 +747,67 @@ export function TrackerTable({ store }: TrackerTableProps) {
           </tbody>
         </table>
       </div>
+
+      {/* Add Order Modal */}
+      <Modal 
+        isOpen={isAdding} 
+        onClose={() => setIsAdding(false)} 
+        title="Add New Order"
+      >
+        {renderOrderForm(newOrder, (updates) => setNewOrder({ ...newOrder, ...updates }))}
+        <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '1rem', marginTop: '1.5rem', paddingTop: '1rem', borderTop: '1px solid var(--border-color)' }}>
+          <button
+            className="icon-action-btn"
+            onClick={() => setIsAdding(false)}
+            style={{ width: 'auto', padding: '0.5rem 1rem', fontSize: '0.875rem' }}
+          >
+            Cancel
+          </button>
+          <button
+            className="icon-action-btn"
+            onClick={handleAddSubmit}
+            style={{ color: 'white', background: 'var(--accent-primary)', borderColor: 'var(--accent-primary)', width: 'auto', padding: '0.5rem 1rem', fontSize: '0.875rem', fontWeight: 600 }}
+          >
+            Save Order
+          </button>
+        </div>
+      </Modal>
+
+      {/* Edit Order Sheet */}
+      <Sheet 
+        isOpen={isSheetOpen} 
+        onClose={() => setIsSheetOpen(false)} 
+        title="Edit Order Details"
+        footer={
+          <>
+            <button
+              className="icon-action-btn"
+              onClick={() => {
+                if (editOrder) handleDelete(editOrder.id);
+              }}
+              style={{ color: 'var(--danger)', borderColor: 'rgba(239, 68, 68, 0.3)', width: 'auto', padding: '0.5rem 1rem', fontSize: '0.875rem', marginRight: 'auto' }}
+            >
+              <Trash2 size={16} style={{ marginRight: '0.5rem' }} /> Delete
+            </button>
+            <button
+              className="icon-action-btn"
+              onClick={() => setIsSheetOpen(false)}
+              style={{ width: 'auto', padding: '0.5rem 1rem', fontSize: '0.875rem' }}
+            >
+              Cancel
+            </button>
+            <button
+              className="icon-action-btn"
+              onClick={handleEditSubmit}
+              style={{ color: 'white', background: 'var(--accent-primary)', borderColor: 'var(--accent-primary)', width: 'auto', padding: '0.5rem 1rem', fontSize: '0.875rem', fontWeight: 600 }}
+            >
+              Save Changes
+            </button>
+          </>
+        }
+      >
+        {editOrder && renderOrderForm(editOrder, (updates) => setEditOrder({ ...editOrder, ...updates }))}
+      </Sheet>
     </div>
   );
 }

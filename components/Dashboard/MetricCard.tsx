@@ -9,6 +9,7 @@ interface MetricCardProps {
   isCurrency?: boolean;
   trendLabel?: string;
   colorClass?: string;
+  onClick?: () => void;
 }
 
 export function MetricCard({
@@ -19,11 +20,16 @@ export function MetricCard({
   isCurrency = true,
   trendLabel = 'vs last month',
   colorClass = 'text-accent',
+  onClick,
 }: MetricCardProps) {
   const isPositive = trend >= 0;
 
   return (
-    <div className="metric-card glass-panel animate-fade-in">
+    <div 
+      className={`metric-card glass-panel animate-fade-in ${onClick ? 'cursor-pointer hover-scale' : ''}`}
+      onClick={onClick}
+      style={onClick ? { cursor: 'pointer' } : undefined}
+    >
       <div className="metric-header flex-between">
         <h3 className="metric-title">{title}</h3>
         <div className={`metric-icon-wrapper ${colorClass}`}>

@@ -81,7 +81,6 @@ const EMPTY_NEW_ORDER: Omit<ManualOrder, 'id'> = {
   costPrice: 0,
   sellingPrice: 0,
   settlementPrice: 0,
-  shippingFee: 0,
   returnDurationDays: 10,
   status: 'In Transit',
   returnCondition: 'Good',
@@ -213,7 +212,6 @@ export function TrackerTable({ store }: TrackerTableProps) {
           costPrice: Number(row.costPrice) || 0,
           sellingPrice: Number(row.sellingPrice) || 0,
           settlementPrice: Number(row.settlementPrice ?? row.settlementAmount) || 0,
-          shippingFee: Number(row.shippingFee) || 0,
           returnDurationDays: Number(row.returnDurationDays) || 10,
           status: STATUS_OPTIONS.includes(row.status) ? row.status : 'In Transit',
           returnCondition: (['Good', 'Damaged'] as ReturnCondition[]).includes(row.returnCondition)
@@ -325,13 +323,14 @@ export function TrackerTable({ store }: TrackerTableProps) {
     const effective = getEffectiveStatus(order);
 
     if (effective === 'Returned') {
+      const effectiveReverseFee = order.returnType === 'RTO' ? 0 : order.reverseShippingFee;
       let loss: number;
       if (order.returnCondition === 'Good') {
-        // Only shipping fees are lost; investment recovered
-        loss = order.shippingFee + order.reverseShippingFee;
+        // Only reverse shipping fees are lost; investment recovered
+        loss = effectiveReverseFee;
       } else {
-        // Cost price + shipping fees lost (product is damaged/unsellable)
-        loss = order.costPrice + order.shippingFee + order.reverseShippingFee;
+        // Settlement price + reverse shipping fee lost (product is damaged/unsellable)
+        loss = order.settlementPrice + effectiveReverseFee;
       }
       return (
         <div className="profit-badge negative" style={{ padding: '0.25rem 0.5rem', fontSize: '0.8rem' }}>
@@ -437,7 +436,7 @@ export function TrackerTable({ store }: TrackerTableProps) {
         </div>
       </div>
 
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1rem' }}>
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr', gap: '1rem' }}>
         <div className="form-group" style={{ display: 'flex', flexDirection: 'column', gap: '0.25rem' }}>
           <label style={{ fontSize: '0.875rem', color: 'var(--text-secondary)' }}>Settlement (₹)</label>
           <input
@@ -446,16 +445,6 @@ export function TrackerTable({ store }: TrackerTableProps) {
             style={{ width: '100%', padding: '0.5rem', color: 'white', border: '1px solid var(--border-color)', borderRadius: '6px', background: 'var(--bg-tertiary)' }}
             value={orderState.settlementPrice === 0 && !orderState.productName ? '' : orderState.settlementPrice}
             onChange={(e) => onChange({ settlementPrice: Number(e.target.value) })}
-          />
-        </div>
-        <div className="form-group" style={{ display: 'flex', flexDirection: 'column', gap: '0.25rem' }}>
-          <label style={{ fontSize: '0.875rem', color: 'var(--text-secondary)' }}>Shipping Fee (₹)</label>
-          <input
-            type="number"
-            className="cp-input-wrapper"
-            style={{ width: '100%', padding: '0.5rem', color: 'white', border: '1px solid var(--border-color)', borderRadius: '6px', background: 'var(--bg-tertiary)' }}
-            value={orderState.shippingFee === 0 && !orderState.productName ? '' : orderState.shippingFee}
-            onChange={(e) => onChange({ shippingFee: Number(e.target.value) })}
           />
         </div>
       </div>

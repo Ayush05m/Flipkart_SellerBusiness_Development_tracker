@@ -147,7 +147,7 @@ export function TrackerOverview() {
             <div className="breakdown-item">
               <PackageCheck size={14} style={{ color: 'var(--success)' }} />
               <span>{metrics.returnedGoodOrders}</span>
-              <small>Good</small>
+              <small>Sellable</small>
             </div>
             <div className="breakdown-item">
               <PackageX size={14} style={{ color: 'var(--danger)' }} />
@@ -155,14 +155,31 @@ export function TrackerOverview() {
               <small>Damaged</small>
             </div>
             <div className="breakdown-item">
+              <IndianRupee size={14} style={{ color: 'var(--success)' }} />
+              <span>₹{formatAmount(metrics.returnSellableLosses)}</span>
+              <small>Sellable Loss</small>
+            </div>
+            <div className="breakdown-item">
+              <IndianRupee size={14} style={{ color: 'var(--danger)' }} />
+              <span>₹{formatAmount(metrics.returnDamagedLosses)}</span>
+              <small>Damaged Loss</small>
+            </div>
+          </div>
+          <div className="order-breakdown-grid" style={{ marginTop: '0.5rem' }}>
+            <div className="breakdown-item">
               <BarChart3 size={14} style={{ color: 'var(--text-secondary)' }} />
               <span>{metrics.returnRate.toFixed(1)}%</span>
               <small>Return %</small>
             </div>
             <div className="breakdown-item">
-              <IndianRupee size={14} style={{ color: 'var(--danger)' }} />
+              <Truck size={14} style={{ color: 'var(--warning)' }} />
+              <span>₹{formatAmount(metrics.forwardShippingTotal)}</span>
+              <small>Fwd Ship</small>
+            </div>
+            <div className="breakdown-item">
+              <CornerDownLeft size={14} style={{ color: '#a855f7' }} />
               <span>₹{formatAmount(metrics.reverseShippingTotal)}</span>
-              <small>Ship Fees</small>
+              <small>Rev Ship</small>
             </div>
           </div>
         </div>

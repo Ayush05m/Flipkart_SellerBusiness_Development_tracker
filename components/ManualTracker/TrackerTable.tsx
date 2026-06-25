@@ -80,6 +80,7 @@ const EMPTY_NEW_ORDER: Omit<ManualOrder, 'id'> = {
   costPrice: 0,
   sellingPrice: 0,
   settlementPrice: 0,
+  shippingFee: 0,
   returnDurationDays: 10,
   status: 'In Transit',
   returnCondition: 'Good',
@@ -183,6 +184,7 @@ export function TrackerTable({ store }: TrackerTableProps) {
           costPrice: Number(row.costPrice) || 0,
           sellingPrice: Number(row.sellingPrice) || 0,
           settlementPrice: Number(row.settlementPrice ?? row.settlementAmount) || 0,
+          shippingFee: Number(row.shippingFee) || 0,
           returnDurationDays: Number(row.returnDurationDays) || 10,
           status: STATUS_OPTIONS.includes(row.status) ? row.status : 'In Transit',
           returnCondition: (['Good', 'Damaged'] as ReturnCondition[]).includes(row.returnCondition)
@@ -277,11 +279,11 @@ export function TrackerTable({ store }: TrackerTableProps) {
     if (effective === 'Returned') {
       let loss: number;
       if (order.returnCondition === 'Good') {
-        // Only reverse shipping fee is lost; investment recovered
-        loss = order.reverseShippingFee;
+        // Only shipping fees are lost; investment recovered
+        loss = order.shippingFee + order.reverseShippingFee;
       } else {
-        // Selling price + reverse shipping fee lost (revenue perspective)
-        loss = order.sellingPrice + order.reverseShippingFee;
+        // Cost price + shipping fees lost (product is damaged/unsellable)
+        loss = order.costPrice + order.shippingFee + order.reverseShippingFee;
       }
       return (
         <div className="profit-badge negative" style={{ padding: '0.25rem 0.5rem', fontSize: '0.8rem' }}>
@@ -445,6 +447,7 @@ export function TrackerTable({ store }: TrackerTableProps) {
               <th className="text-right">Cost Price (₹)</th>
               <th className="text-right">Selling Price (₹)</th>
               <th className="text-right">Settlement (₹)</th>
+              <th className="text-right">Ship Fee (₹)</th>
               <th className="text-center">Return Duration</th>
               <th>Status</th>
               <th>Return Period</th>
@@ -503,6 +506,15 @@ export function TrackerTable({ store }: TrackerTableProps) {
                   />
                 </td>
                 <td>
+                  <input
+                    type="number"
+                    className="cp-input"
+                    value={newOrder.shippingFee || ''}
+                    placeholder="0"
+                    onChange={(e) => setNewOrder({ ...newOrder, shippingFee: Number(e.target.value) })}
+                  />
+                </td>
+                <td>
                   <div className="flex-center gap-2">
                     <input
                       type="number"
@@ -525,6 +537,7 @@ export function TrackerTable({ store }: TrackerTableProps) {
                     ))}
                   </select>
                 </td>
+                <td style={{ textAlign: 'center', color: 'var(--text-tertiary)' }}>—</td>
                 <td style={{ textAlign: 'center', color: 'var(--text-tertiary)' }}>—</td>
                 <td style={{ textAlign: 'center', color: 'var(--text-tertiary)' }}>—</td>
                 <td style={{ textAlign: 'center', color: 'var(--text-tertiary)' }}>—</td>
@@ -589,6 +602,17 @@ export function TrackerTable({ store }: TrackerTableProps) {
                           className="cp-input"
                           value={order.settlementPrice}
                           onChange={(e) => updateOrder(order.id, { settlementPrice: Number(e.target.value) })}
+                        />
+                      </div>
+                    </td>
+                    <td className="text-right">
+                      <div className="cp-input-wrapper" style={{ padding: '0.2rem 0.5rem' }}>
+                        <span className="currency-prefix">₹</span>
+                        <input
+                          type="number"
+                          className="cp-input"
+                          value={order.shippingFee}
+                          onChange={(e) => updateOrder(order.id, { shippingFee: Number(e.target.value) })}
                         />
                       </div>
                     </td>
@@ -673,7 +697,7 @@ export function TrackerTable({ store }: TrackerTableProps) {
 
             {filteredOrders.length === 0 && !isAdding && (
               <tr>
-                <td colSpan={11} style={{ textAlign: 'center', padding: '3rem', color: 'var(--text-tertiary)' }}>
+                <td colSpan={12} style={{ textAlign: 'center', padding: '3rem', color: 'var(--text-tertiary)' }}>
                   {orders.length === 0
                     ? 'No orders yet. Click "Add Order" to start tracking manually.'
                     : 'No orders match your current filter.'}

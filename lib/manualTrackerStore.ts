@@ -19,6 +19,7 @@ export interface ManualOrder {
   costPrice: number;
   sellingPrice: number;       // includes platform/shipping fees baked in
   settlementPrice: number;    // what Flipkart actually credits (SP minus GST/taxes)
+  shippingFee: number;            // forward shipping fee paid to ship to customer
   returnDurationDays: number;
   status: OrderStatus;
   returnCondition: ReturnCondition; // only meaningful when status is Returned
@@ -31,10 +32,13 @@ export interface TrackerMetrics {
   netProfit: number;
   securedProfit: number;
   atRiskProfit: number;
-  returnLosses: number;
-  investmentCost: number;
-  gstAndTaxes: number;       // sellingPrice - settlementPrice (deducted by Flipkart)
-  reverseShippingTotal: number;
+  returnLosses: number;           // total losses from all returns
+  returnSellableLosses: number;   // losses from good returns (shipping fees only)
+  returnDamagedLosses: number;    // losses from damaged returns (costPrice + shipping fees)
+  investmentCost: number;         // excludes return-sellable orders (product is back)
+  gstAndTaxes: number;            // sellingPrice - settlementPrice (only for non-returned orders)
+  forwardShippingTotal: number;   // total forward shipping fees across all orders
+  reverseShippingTotal: number;   // total reverse shipping fees across returned orders
   // Order counts
   totalOrders: number;
   deliveredOrders: number;
@@ -105,6 +109,7 @@ export function useManualTracker() {
         const parsed = JSON.parse(stored) as ManualOrder[];
         const migrated = parsed.map((o) => ({
           ...o,
+          shippingFee: o.shippingFee ?? 0,
           returnCondition: o.returnCondition || 'Good',
           reverseShippingFee: o.reverseShippingFee ?? 0,
         }));
@@ -171,8 +176,11 @@ export function useManualTracker() {
     let securedProfit = 0;
     let atRiskProfit = 0;
     let returnLosses = 0;
+    let returnSellableLosses = 0;
+    let returnDamagedLosses = 0;
     let investmentCost = 0;
     let gstAndTaxes = 0;
+    let forwardShippingTotal = 0;
     let reverseShippingTotal = 0;
     let deliveredOrders = 0;
     let returnedOrders = 0;
@@ -190,32 +198,41 @@ export function useManualTracker() {
       const effectiveStatus = getEffectiveStatus(order);
       const taxDeduction = Math.max(0, order.sellingPrice - order.settlementPrice);
 
-      // Investment cost is always counted — you bought the product regardless of outcome
-      investmentCost += order.costPrice;
-
       if (effectiveStatus === 'Returned') {
         returnedOrders++;
         reverseShippingTotal += order.reverseShippingFee;
+        forwardShippingTotal += order.shippingFee;
 
         if (order.returnCondition === 'Good') {
-          // Product came back in sellable condition
-          // Investment is recovered (product is back with you)
-          // Loss = only the reverse shipping fee
+          // ── Return Sellable ─────────────────────────────────
+          // Product came back in sellable condition.
+          // • NO revenue, NO GST, NO investment cost (product is back with seller)
+          // • Only losses = forward shipping fee + reverse shipping fee
           returnedGoodOrders++;
-          returnLosses += order.reverseShippingFee;
+          const goodLoss = order.shippingFee + order.reverseShippingFee;
+          returnSellableLosses += goodLoss;
+          returnLosses += goodLoss;
         } else {
-          // Product came back damaged/used — not sellable
-          // Loss is the selling price (revenue lost) + reverse shipping fee
+          // ── Return Damaged ─────────────────────────────────
+          // Product came back damaged/used — not sellable.
+          // • NO revenue, NO GST
+          // • Investment cost IS counted (cost price is a real loss)
+          // • Losses = costPrice + forward shipping fee + reverse shipping fee
           returnedDamagedOrders++;
-          returnLosses += order.sellingPrice + order.reverseShippingFee;
+          investmentCost += order.costPrice;
+          const damagedLoss = order.costPrice + order.shippingFee + order.reverseShippingFee;
+          returnDamagedLosses += damagedLoss;
+          returnLosses += damagedLoss;
         }
 
-        // No GST/taxes for returned orders — there is no settlement
+        // No GST/taxes or revenue for returned orders — sale is effectively cancelled
 
       } else if (effectiveStatus === 'Delivered') {
         // Return period passed — fully secured
         deliveredOrders++;
         securedOrders++;
+        investmentCost += order.costPrice;
+        forwardShippingTotal += order.shippingFee;
         grossRevenue += order.sellingPrice;
         gstAndTaxes += taxDeduction;
         const profit = order.settlementPrice - order.costPrice;
@@ -229,6 +246,8 @@ export function useManualTracker() {
       } else if (effectiveStatus === 'Return Period Ongoing') {
         // Delivered but return window still open — at risk
         returnPeriodOngoingOrders++;
+        investmentCost += order.costPrice;
+        forwardShippingTotal += order.shippingFee;
         grossRevenue += order.sellingPrice;
         gstAndTaxes += taxDeduction;
         const profit = order.settlementPrice - order.costPrice;
@@ -241,6 +260,8 @@ export function useManualTracker() {
 
       } else if (effectiveStatus === 'In Transit') {
         inTransitOrders++;
+        investmentCost += order.costPrice;
+        forwardShippingTotal += order.shippingFee;
         gstAndTaxes += taxDeduction;
         // Expected but not yet realized
         const expectedProfit = order.settlementPrice ? order.settlementPrice - order.costPrice : 0;
@@ -248,12 +269,14 @@ export function useManualTracker() {
 
       } else if (effectiveStatus === 'Return In Transit') {
         returnInTransitOrders++;
-        gstAndTaxes += taxDeduction;
+        forwardShippingTotal += order.shippingFee;
+        // Don't add GST — return is in progress, sale may be cancelled
+        // Don't add to investmentCost yet — depends on return condition
         // Return is in progress — we don't know condition yet
-        // Treat as potential loss (at minimum reverse shipping fee)
-        // For now, count the reverse shipping fee as pending loss
+        // Treat as potential loss (at minimum shipping fees)
         reverseShippingTotal += order.reverseShippingFee;
-        returnLosses += order.reverseShippingFee;
+        const pendingLoss = order.shippingFee + order.reverseShippingFee;
+        returnLosses += pendingLoss;
       }
     });
 
@@ -276,7 +299,9 @@ export function useManualTracker() {
     // Build fee breakdown
     const feeBreakdown = [
       { name: 'GST & Taxes', value: gstAndTaxes },
-      { name: 'Return Losses', value: returnLosses },
+      { name: 'Fwd Shipping', value: forwardShippingTotal },
+      { name: 'Ret. Sellable Loss', value: returnSellableLosses },
+      { name: 'Ret. Damaged Loss', value: returnDamagedLosses },
       { name: 'Investment (CP)', value: investmentCost },
       { name: 'Secured Profit', value: Math.max(securedProfit, 0) },
       { name: 'At-Risk Profit', value: Math.max(atRiskProfit, 0) },
@@ -288,8 +313,11 @@ export function useManualTracker() {
       securedProfit,
       atRiskProfit,
       returnLosses,
+      returnSellableLosses,
+      returnDamagedLosses,
       investmentCost,
       gstAndTaxes,
+      forwardShippingTotal,
       reverseShippingTotal,
       totalOrders: orders.length,
       deliveredOrders,

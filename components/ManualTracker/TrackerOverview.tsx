@@ -8,12 +8,10 @@ import {
   RefreshCcw,
   ShoppingCart,
   Receipt,
-  TrendingUp,
   ShieldCheck,
   AlertTriangle,
   Truck,
   Package,
-  BarChart3,
   CornerDownLeft,
   PackageCheck,
   PackageX,
@@ -21,12 +19,16 @@ import {
   FileText,
   Plus,
   Trash2,
+  BadgeIndianRupee,
+  Banknote,
+  CircleDollarSign,
+  CheckCircle2,
 } from 'lucide-react';
 import { MetricCard } from '../Dashboard/MetricCard';
 import { ProfitTrendChart } from '../Charts/ProfitTrendChart';
 import { FeesBreakdownChart } from '../Charts/FeesBreakdownChart';
 import { TrackerTable } from './TrackerTable';
-import { useManualTracker, SpfClaim, MiscCost } from '../../lib/manualTrackerStore';
+import { useManualTracker, SpfClaim, MiscCost, SettlementPayment } from '../../lib/manualTrackerStore';
 import { Sheet } from '../UI/Sheet';
 
 function formatAmount(amount: number) {
@@ -37,13 +39,31 @@ function formatAmount(amount: number) {
 
 export function TrackerOverview() {
   const store = useManualTracker();
-  const { metrics, spfClaims, miscCosts, addSpfClaim, deleteSpfClaim, addMiscCost, deleteMiscCost } = store;
+  const {
+    metrics,
+    spfClaims,
+    miscCosts,
+    settlementPayments,
+    addSpfClaim,
+    deleteSpfClaim,
+    addMiscCost,
+    deleteMiscCost,
+    addSettlementPayment,
+    deleteSettlementPayment,
+  } = store;
 
   const [isSpfSheetOpen, setIsSpfSheetOpen] = useState(false);
   const [newSpf, setNewSpf] = useState<Partial<SpfClaim>>({ date: new Date().toISOString().split('T')[0], amount: 0, orderId: '', note: '', status: 'Approved' });
 
   const [isMiscSheetOpen, setIsMiscSheetOpen] = useState(false);
   const [newMisc, setNewMisc] = useState<Partial<MiscCost>>({ date: new Date().toISOString().split('T')[0], amount: 0, note: '' });
+
+  const [isSettlementSheetOpen, setIsSettlementSheetOpen] = useState(false);
+  const [newSettlement, setNewSettlement] = useState<Partial<SettlementPayment>>({
+    date: new Date().toISOString().split('T')[0],
+    amount: 0,
+    note: '',
+  });
 
   const handleAddSpf = () => {
     if (!newSpf.amount || !newSpf.note) return;
@@ -55,6 +75,12 @@ export function TrackerOverview() {
     if (!newMisc.amount || !newMisc.note) return;
     addMiscCost(newMisc as any);
     setNewMisc({ date: new Date().toISOString().split('T')[0], amount: 0, note: '' });
+  };
+
+  const handleAddSettlement = () => {
+    if (!newSettlement.amount || !newSettlement.note) return;
+    addSettlementPayment(newSettlement as any);
+    setNewSettlement({ date: new Date().toISOString().split('T')[0], amount: 0, note: '' });
   };
 
   return (
@@ -215,6 +241,139 @@ export function TrackerOverview() {
         </div>
       </div>
 
+      {/* ─── Settlement Tracker Panel ─────────────────────────────── */}
+      <div
+        className="glass-panel animate-fade-in"
+        style={{
+          marginBottom: '1.5rem',
+          padding: '1.5rem',
+          border: '1px solid rgba(59,130,246,0.25)',
+          background: 'linear-gradient(135deg, rgba(59,130,246,0.06) 0%, rgba(16,185,129,0.04) 100%)',
+        }}
+      >
+        {/* Header */}
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.25rem' }}>
+          <div>
+            <h3 style={{ fontSize: '1.05rem', fontWeight: 700, color: 'var(--text-primary)', margin: 0, display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+              <BadgeIndianRupee size={18} style={{ color: 'var(--info)' }} />
+              Flipkart Settlement Tracker
+            </h3>
+            <p style={{ fontSize: '0.78rem', color: 'var(--text-tertiary)', marginTop: '0.2rem' }}>
+              Track what Flipkart owes you vs what you&apos;ve received · only secured (return-window-closed) orders
+            </p>
+          </div>
+          <button
+            className="source-pill flipkart"
+            style={{ fontSize: '0.78rem', gap: '0.35rem' }}
+            onClick={() => setIsSettlementSheetOpen(true)}
+          >
+            <Plus size={13} /> Log Payment
+          </button>
+        </div>
+
+        {/* Three summary columns */}
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '1rem', marginBottom: '1.25rem' }}>
+          {/* Total Due */}
+          <div
+            style={{
+              background: 'rgba(59,130,246,0.08)',
+              border: '1px solid rgba(59,130,246,0.2)',
+              borderRadius: '12px',
+              padding: '1rem 1.25rem',
+            }}
+          >
+            <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', marginBottom: '0.4rem' }}>
+              <CircleDollarSign size={15} style={{ color: 'var(--info)' }} />
+              <span style={{ fontSize: '0.75rem', color: 'var(--text-secondary)', textTransform: 'uppercase', letterSpacing: '0.04em' }}>Total Settlement Due</span>
+            </div>
+            <div style={{ fontSize: '1.6rem', fontWeight: 800, color: 'var(--info)', lineHeight: 1 }}>
+              ₹{formatAmount(metrics.totalSettlementDue)}
+            </div>
+            <div style={{ fontSize: '0.72rem', color: 'var(--text-tertiary)', marginTop: '0.35rem' }}>
+              From {metrics.securedOrders} secured order{metrics.securedOrders !== 1 ? 's' : ''}
+            </div>
+          </div>
+
+          {/* Received */}
+          <div
+            style={{
+              background: 'rgba(16,185,129,0.08)',
+              border: '1px solid rgba(16,185,129,0.2)',
+              borderRadius: '12px',
+              padding: '1rem 1.25rem',
+            }}
+          >
+            <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', marginBottom: '0.4rem' }}>
+              <Banknote size={15} style={{ color: 'var(--success)' }} />
+              <span style={{ fontSize: '0.75rem', color: 'var(--text-secondary)', textTransform: 'uppercase', letterSpacing: '0.04em' }}>Payment Received</span>
+            </div>
+            <div style={{ fontSize: '1.6rem', fontWeight: 800, color: 'var(--success)', lineHeight: 1 }}>
+              ₹{formatAmount(metrics.totalSettlementReceived)}
+            </div>
+            <div style={{ fontSize: '0.72rem', color: 'var(--text-tertiary)', marginTop: '0.35rem' }}>
+              {settlementPayments.length} payment{settlementPayments.length !== 1 ? 's' : ''} logged
+            </div>
+          </div>
+
+          {/* Remaining */}
+          <div
+            style={{
+              background: metrics.settlementRemaining <= 0
+                ? 'rgba(16,185,129,0.08)'
+                : 'rgba(239,68,68,0.08)',
+              border: `1px solid ${metrics.settlementRemaining <= 0 ? 'rgba(16,185,129,0.2)' : 'rgba(239,68,68,0.2)'}`,
+              borderRadius: '12px',
+              padding: '1rem 1.25rem',
+            }}
+          >
+            <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', marginBottom: '0.4rem' }}>
+              <CheckCircle2 size={15} style={{ color: metrics.settlementRemaining <= 0 ? 'var(--success)' : 'var(--danger)' }} />
+              <span style={{ fontSize: '0.75rem', color: 'var(--text-secondary)', textTransform: 'uppercase', letterSpacing: '0.04em' }}>Remaining Balance</span>
+            </div>
+            <div
+              style={{
+                fontSize: '1.6rem',
+                fontWeight: 800,
+                color: metrics.settlementRemaining <= 0 ? 'var(--success)' : 'var(--danger)',
+                lineHeight: 1,
+              }}
+            >
+              ₹{formatAmount(Math.abs(metrics.settlementRemaining))}
+            </div>
+            <div style={{ fontSize: '0.72rem', color: 'var(--text-tertiary)', marginTop: '0.35rem' }}>
+              {metrics.settlementRemaining <= 0
+                ? metrics.settlementRemaining === 0 ? 'Fully settled ✓' : `Overpaid by ₹${formatAmount(Math.abs(metrics.settlementRemaining))}`
+                : 'Still to be received from Flipkart'}
+            </div>
+          </div>
+        </div>
+
+        {/* Progress bar */}
+        {metrics.totalSettlementDue > 0 && (
+          <div>
+            <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '0.4rem' }}>
+              <span style={{ fontSize: '0.72rem', color: 'var(--text-tertiary)' }}>Settlement progress</span>
+              <span style={{ fontSize: '0.72rem', color: 'var(--text-secondary)', fontWeight: 600 }}>
+                {Math.min(100, Math.round((metrics.totalSettlementReceived / metrics.totalSettlementDue) * 100))}%
+              </span>
+            </div>
+            <div style={{ height: '6px', background: 'rgba(255,255,255,0.08)', borderRadius: '999px', overflow: 'hidden' }}>
+              <div
+                style={{
+                  height: '100%',
+                  width: `${Math.min(100, (metrics.totalSettlementReceived / metrics.totalSettlementDue) * 100)}%`,
+                  background: metrics.settlementRemaining <= 0
+                    ? 'var(--success)'
+                    : 'linear-gradient(90deg, var(--info), var(--success))',
+                  borderRadius: '999px',
+                  transition: 'width 0.5s ease',
+                }}
+              />
+            </div>
+          </div>
+        )}
+      </div>
+
       {/* Charts — mirrors the main dashboard */}
       <div className="dashboard-grid grid-cols-2" style={{ marginBottom: '0' }}>
         <ProfitTrendChart data={metrics.revenueTrend} />
@@ -289,6 +448,97 @@ export function TrackerOverview() {
                   <div style={{ fontSize: '0.8rem', color: 'var(--text-primary)', marginTop: '0.2rem' }}>{cost.note}</div>
                 </div>
                 <button className="icon-action-btn" onClick={() => deleteMiscCost(cost.id)}><Trash2 size={14} className="text-danger" /></button>
+              </div>
+            ))}
+          </div>
+        </div>
+      </Sheet>
+
+      {/* Settlement Payment Log Sheet */}
+      <Sheet isOpen={isSettlementSheetOpen} onClose={() => setIsSettlementSheetOpen(false)} title="Settlement Payments">
+        <div className="flex-col gap-3">
+          <div className="glass-panel" style={{ padding: '1rem', marginBottom: '1rem' }}>
+            <h4 style={{ marginBottom: '0.5rem', fontSize: '0.875rem', color: 'var(--text-secondary)' }}>Log New Payment</h4>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.5rem', marginBottom: '0.5rem' }}>
+              <input
+                type="date"
+                className="cp-input-wrapper"
+                style={{ padding: '0.5rem', borderRadius: '4px', border: '1px solid var(--border-color)', background: 'transparent', color: 'white' }}
+                value={newSettlement.date}
+                onChange={(e) => setNewSettlement({ ...newSettlement, date: e.target.value })}
+              />
+              <input
+                type="number"
+                placeholder="Amount received (₹)"
+                className="cp-input-wrapper"
+                style={{ padding: '0.5rem', borderRadius: '4px', border: '1px solid var(--border-color)', background: 'transparent', color: 'white' }}
+                value={newSettlement.amount || ''}
+                onChange={(e) => setNewSettlement({ ...newSettlement, amount: Number(e.target.value) })}
+              />
+            </div>
+            <textarea
+              placeholder="Note (e.g. Week 2 June settlement, UTR: 1234)"
+              className="cp-input-wrapper"
+              style={{ width: '100%', padding: '0.5rem', borderRadius: '4px', border: '1px solid var(--border-color)', background: 'transparent', color: 'white', marginBottom: '0.5rem', resize: 'vertical' }}
+              value={newSettlement.note}
+              onChange={(e) => setNewSettlement({ ...newSettlement, note: e.target.value })}
+            />
+            <button className="source-pill flipkart" style={{ width: '100%', justifyContent: 'center' }} onClick={handleAddSettlement}>
+              <Plus size={14} /> Add Payment
+            </button>
+          </div>
+
+          {/* Summary line inside sheet */}
+          <div
+            style={{
+              display: 'flex',
+              justifyContent: 'space-between',
+              padding: '0.6rem 0.8rem',
+              background: 'rgba(59,130,246,0.08)',
+              borderRadius: '8px',
+              marginBottom: '0.5rem',
+              fontSize: '0.8rem',
+            }}
+          >
+            <span style={{ color: 'var(--text-secondary)' }}>Total Received</span>
+            <strong style={{ color: 'var(--success)' }}>₹{formatAmount(metrics.totalSettlementReceived)}</strong>
+          </div>
+          <div
+            style={{
+              display: 'flex',
+              justifyContent: 'space-between',
+              padding: '0.6rem 0.8rem',
+              background: metrics.settlementRemaining <= 0 ? 'rgba(16,185,129,0.08)' : 'rgba(239,68,68,0.08)',
+              borderRadius: '8px',
+              marginBottom: '0.75rem',
+              fontSize: '0.8rem',
+            }}
+          >
+            <span style={{ color: 'var(--text-secondary)' }}>Remaining Balance</span>
+            <strong style={{ color: metrics.settlementRemaining <= 0 ? 'var(--success)' : 'var(--danger)' }}>
+              ₹{formatAmount(Math.abs(metrics.settlementRemaining))}
+              {metrics.settlementRemaining <= 0 && metrics.settlementRemaining !== 0 ? ' (overpaid)' : ''}
+            </strong>
+          </div>
+
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
+            {settlementPayments.length === 0 ? (
+              <p style={{ color: 'var(--text-tertiary)', textAlign: 'center', fontSize: '0.875rem' }}>No payments logged yet.</p>
+            ) : null}
+            {settlementPayments.map((payment) => (
+              <div key={payment.id} className="glass-panel" style={{ padding: '0.75rem', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                <div>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                    <strong style={{ color: 'var(--success)' }}>₹{formatAmount(payment.amount)}</strong>
+                  </div>
+                  <div style={{ fontSize: '0.75rem', color: 'var(--text-secondary)', marginTop: '0.2rem' }}>
+                    {new Date(payment.date).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' })}
+                  </div>
+                  <div style={{ fontSize: '0.8rem', color: 'var(--text-primary)', marginTop: '0.2rem' }}>{payment.note}</div>
+                </div>
+                <button className="icon-action-btn" onClick={() => deleteSettlementPayment(payment.id)}>
+                  <Trash2 size={14} className="text-danger" />
+                </button>
               </div>
             ))}
           </div>

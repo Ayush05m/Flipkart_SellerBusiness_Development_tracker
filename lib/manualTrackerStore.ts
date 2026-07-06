@@ -28,6 +28,13 @@ export interface MiscCost {
   note: string;
 }
 
+export interface SettlementPayment {
+  id: string;
+  date: string;       // YYYY-MM-DD — date payment was received
+  amount: number;     // ₹ amount credited by Flipkart
+  note: string;       // e.g. "Week 1 June settlement", UTR number etc.
+}
+
 export interface ManualOrder {
   id: string;
   productName: string;
@@ -75,9 +82,14 @@ export interface TrackerMetrics {
   // Additional tracking
   totalSpfApprovedAmount: number;
   totalMiscCosts: number;
+  // Settlement tracking
+  totalSettlementDue: number;     // sum of settlementPrice for all Delivered (return-window-closed) orders
+  totalSettlementReceived: number; // sum of all SettlementPayment entries
+  settlementRemaining: number;    // totalSettlementDue - totalSettlementReceived
 }
 
 const STORAGE_KEY = 'flipkart_seller_manual_orders';
+const SETTLEMENT_KEY = STORAGE_KEY + '_settlement_payments';
 
 function getReturnEndDate(order: ManualOrder): number {
   // Return window is calculated from deliveryDate (when customer receives it), not orderDate
@@ -120,6 +132,7 @@ export function useManualTracker() {
   const [orders, setOrders] = useState<ManualOrder[]>([]);
   const [spfClaims, setSpfClaims] = useState<SpfClaim[]>([]);
   const [miscCosts, setMiscCosts] = useState<MiscCost[]>([]);
+  const [settlementPayments, setSettlementPayments] = useState<SettlementPayment[]>([]);
   const [isLoaded, setIsLoaded] = useState(false);
 
   useEffect(() => {
@@ -142,6 +155,9 @@ export function useManualTracker() {
 
       const storedMisc = localStorage.getItem(STORAGE_KEY + '_misc');
       if (storedMisc) setMiscCosts(JSON.parse(storedMisc));
+
+      const storedSettlement = localStorage.getItem(SETTLEMENT_KEY);
+      if (storedSettlement) setSettlementPayments(JSON.parse(storedSettlement));
     } catch {
       // Ignored
     }
@@ -153,8 +169,9 @@ export function useManualTracker() {
       localStorage.setItem(STORAGE_KEY, JSON.stringify(orders));
       localStorage.setItem(STORAGE_KEY + '_spf', JSON.stringify(spfClaims));
       localStorage.setItem(STORAGE_KEY + '_misc', JSON.stringify(miscCosts));
+      localStorage.setItem(SETTLEMENT_KEY, JSON.stringify(settlementPayments));
     }
-  }, [orders, spfClaims, miscCosts, isLoaded]);
+  }, [orders, spfClaims, miscCosts, settlementPayments, isLoaded]);
 
   const addOrder = useCallback((order: Omit<ManualOrder, 'id'>) => {
     const newOrder: ManualOrder = {
@@ -241,7 +258,17 @@ export function useManualTracker() {
     setMiscCosts((prev) => prev.filter((c) => c.id !== id));
   }, []);
 
+  const addSettlementPayment = useCallback((payment: Omit<SettlementPayment, 'id'>) => {
+    setSettlementPayments((prev) => [{ ...payment, id: `sett_${Date.now()}` }, ...prev]);
+  }, []);
+
+  const deleteSettlementPayment = useCallback((id: string) => {
+    setSettlementPayments((prev) => prev.filter((p) => p.id !== id));
+  }, []);
+
   const metrics = useMemo<TrackerMetrics>(() => {
+    // Pre-compute totalSettlementDue from all secured (Delivered, return-window-passed) orders
+    let totalSettlementDue = 0;
     let grossRevenue = 0;
     let securedProfit = 0;
     let atRiskProfit = 0;
@@ -262,6 +289,7 @@ export function useManualTracker() {
 
     let totalSpfApprovedAmount = 0;
     let totalMiscCosts = 0;
+    let totalSettlementReceived = 0;
 
     spfClaims.forEach((c) => {
       if (c.status === 'Approved') totalSpfApprovedAmount += c.amount;
@@ -269,6 +297,10 @@ export function useManualTracker() {
 
     miscCosts.forEach((c) => {
       totalMiscCosts += c.amount;
+    });
+
+    settlementPayments.forEach((p) => {
+      totalSettlementReceived += p.amount;
     });
 
     // For charting — group by order date
@@ -317,6 +349,7 @@ export function useManualTracker() {
         investmentCost += order.costPrice;
         grossRevenue += order.sellingPrice;
         gstAndTaxes += taxDeduction;
+        totalSettlementDue += order.settlementPrice; // Flipkart owes this to seller
         const profit = order.settlementPrice - order.costPrice;
         securedProfit += profit;
 
@@ -390,6 +423,8 @@ export function useManualTracker() {
       { name: 'At-Risk Profit', value: Math.max(atRiskProfit, 0) },
     ];
 
+    const settlementRemaining = totalSettlementDue - totalSettlementReceived;
+
     return {
       grossRevenue,
       netProfit,
@@ -417,13 +452,17 @@ export function useManualTracker() {
       feeBreakdown,
       totalSpfApprovedAmount,
       totalMiscCosts,
+      totalSettlementDue,
+      totalSettlementReceived,
+      settlementRemaining,
     };
-  }, [orders, spfClaims, miscCosts]);
+  }, [orders, spfClaims, miscCosts, settlementPayments]);
 
   return {
     orders,
     spfClaims,
     miscCosts,
+    settlementPayments,
     isLoaded,
     metrics,
     addOrder,
@@ -435,6 +474,8 @@ export function useManualTracker() {
     deleteSpfClaim,
     addMiscCost,
     deleteMiscCost,
+    addSettlementPayment,
+    deleteSettlementPayment,
     getEffectiveStatus: (order: ManualOrder) => getEffectiveStatus(order),
     getDaysLeft: (order: ManualOrder) => getDaysLeft(order),
     isReturnPeriodPassed: (order: ManualOrder) => isReturnPeriodPassed(order),

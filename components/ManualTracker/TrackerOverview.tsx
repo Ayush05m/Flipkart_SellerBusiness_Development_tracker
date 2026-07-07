@@ -406,7 +406,7 @@ export function TrackerOverview() {
 
           <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
             {spfClaims.length === 0 ? <p style={{ color: 'var(--text-tertiary)', textAlign: 'center', fontSize: '0.875rem' }}>No claims tracked yet.</p> : null}
-            {spfClaims.map((claim) => (
+            {[...spfClaims].sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime()).map((claim) => (
               <div key={claim.id} className="glass-panel" style={{ padding: '0.75rem', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                 <div>
                   <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
@@ -438,7 +438,7 @@ export function TrackerOverview() {
 
           <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
             {miscCosts.length === 0 ? <p style={{ color: 'var(--text-tertiary)', textAlign: 'center', fontSize: '0.875rem' }}>No costs tracked yet.</p> : null}
-            {miscCosts.map((cost) => (
+            {[...miscCosts].sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime()).map((cost) => (
               <div key={cost.id} className="glass-panel" style={{ padding: '0.75rem', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                 <div>
                   <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
@@ -525,7 +525,7 @@ export function TrackerOverview() {
             {settlementPayments.length === 0 ? (
               <p style={{ color: 'var(--text-tertiary)', textAlign: 'center', fontSize: '0.875rem' }}>No payments logged yet.</p>
             ) : null}
-            {settlementPayments.map((payment) => (
+            {[...settlementPayments].sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime()).map((payment) => (
               <div key={payment.id} className="glass-panel" style={{ padding: '0.75rem', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                 <div>
                   <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>

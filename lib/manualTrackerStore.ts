@@ -222,7 +222,7 @@ export function useManualTracker() {
     });
   }, []);
 
-  const importData = useCallback((payload: { orders?: ManualOrder[], spfClaims?: SpfClaim[], miscCosts?: MiscCost[] }) => {
+  const importData = useCallback((payload: { orders?: ManualOrder[], spfClaims?: SpfClaim[], miscCosts?: MiscCost[], settlementPayments?: SettlementPayment[] }) => {
     if (payload.orders && payload.orders.length > 0) {
       importOrders(payload.orders);
     }
@@ -237,6 +237,13 @@ export function useManualTracker() {
       setMiscCosts((prev) => {
         const existingMap = new Map(prev.map((c) => [c.id, c]));
         payload.miscCosts!.forEach((c) => existingMap.set(c.id, c));
+        return Array.from(existingMap.values());
+      });
+    }
+    if (payload.settlementPayments && payload.settlementPayments.length > 0) {
+      setSettlementPayments((prev) => {
+        const existingMap = new Map(prev.map((c) => [c.id, c]));
+        payload.settlementPayments!.forEach((c) => existingMap.set(c.id, c));
         return Array.from(existingMap.values());
       });
     }

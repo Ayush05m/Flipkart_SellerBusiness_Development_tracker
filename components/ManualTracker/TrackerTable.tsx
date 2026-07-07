@@ -17,6 +17,7 @@ import {
   PackageCheck,
   Download,
   Upload,
+  ArrowUpDown,
 } from 'lucide-react';
 import { ManualOrder, OrderStatus, ReturnCondition, ReturnTypeVal, useManualTracker } from '../../lib/manualTrackerStore';
 import { Modal } from '../UI/Modal';
@@ -89,7 +90,7 @@ const EMPTY_NEW_ORDER: Omit<ManualOrder, 'id'> = {
 };
 
 export function TrackerTable({ store }: TrackerTableProps) {
-  const { orders, addOrder, updateOrder, deleteOrder, importData, getEffectiveStatus, getDaysLeft, spfClaims, miscCosts } = store;
+  const { orders, addOrder, updateOrder, deleteOrder, importData, getEffectiveStatus, getDaysLeft, spfClaims, miscCosts, settlementPayments } = store;
   
   // Modal & Sheet State
   const [isAdding, setIsAdding] = useState(false);
@@ -103,15 +104,22 @@ export function TrackerTable({ store }: TrackerTableProps) {
   const [filterStatus, setFilterStatus] = useState<OrderStatus | 'All'>('All');
   const [searchQuery, setSearchQuery] = useState('');
   const [importMessage, setImportMessage] = useState('');
+  const [sortOrder, setSortOrder] = useState<'desc' | 'asc'>('desc');
 
   const filteredOrders = useMemo(() => {
-    return orders.filter((order) => {
+    const filtered = orders.filter((order) => {
       const effective = getEffectiveStatus(order);
       const matchesStatus = filterStatus === 'All' || effective === filterStatus;
       const matchesSearch = !searchQuery || order.productName.toLowerCase().includes(searchQuery.toLowerCase());
       return matchesStatus && matchesSearch;
     });
-  }, [orders, filterStatus, searchQuery, getEffectiveStatus]);
+
+    return filtered.sort((a, b) => {
+      const timeA = new Date(a.orderDate).getTime();
+      const timeB = new Date(b.orderDate).getTime();
+      return sortOrder === 'desc' ? timeB - timeA : timeA - timeB;
+    });
+  }, [orders, filterStatus, searchQuery, getEffectiveStatus, sortOrder]);
 
   const handleAddSubmit = () => {
     if (!newOrder.productName) return;
@@ -154,6 +162,7 @@ export function TrackerTable({ store }: TrackerTableProps) {
       orders,
       spfClaims,
       miscCosts,
+      settlementPayments,
     };
     const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' });
     const url = URL.createObjectURL(blob);
@@ -187,6 +196,7 @@ export function TrackerTable({ store }: TrackerTableProps) {
       let rawOrders: any[] = [];
       let rawSpf: any[] = [];
       let rawMisc: any[] = [];
+      let rawSettlements: any[] = [];
 
       if (Array.isArray(parsed)) {
         // Legacy fallback
@@ -196,6 +206,7 @@ export function TrackerTable({ store }: TrackerTableProps) {
         rawOrders = Array.isArray(parsed.orders) ? parsed.orders : [];
         rawSpf = Array.isArray(parsed.spfClaims) ? parsed.spfClaims : [];
         rawMisc = Array.isArray(parsed.miscCosts) ? parsed.miscCosts : [];
+        rawSettlements = Array.isArray(parsed.settlementPayments) ? parsed.settlementPayments : [];
       } else {
         setImportMessage('Invalid file format.');
         return;
@@ -239,14 +250,21 @@ export function TrackerTable({ store }: TrackerTableProps) {
         note: String(c.note || '')
       }));
 
-      if (!finalOrders.length && !finalSpf.length && !finalMisc.length) {
+      const finalSettlements = rawSettlements.filter(c => c && c.amount).map(c => ({
+        id: c.id || `sett_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
+        amount: Number(c.amount) || 0,
+        date: String(c.date || new Date().toISOString().split('T')[0]),
+        note: String(c.note || '')
+      }));
+
+      if (!finalOrders.length && !finalSpf.length && !finalMisc.length && !finalSettlements.length) {
         setImportMessage('No valid data found in the file.');
         alert('No valid data found in the file.');
         return;
       }
 
-      importData({ orders: finalOrders, spfClaims: finalSpf, miscCosts: finalMisc });
-      const successMsg = `✓ Imported ${finalOrders.length} orders, ${finalSpf.length} claims, ${finalMisc.length} costs.`;
+      importData({ orders: finalOrders, spfClaims: finalSpf, miscCosts: finalMisc, settlementPayments: finalSettlements });
+      const successMsg = `✓ Imported ${finalOrders.length} orders, ${finalSpf.length} claims, ${finalMisc.length} costs, ${finalSettlements.length} payments.`;
       setImportMessage(successMsg);
       alert(successMsg); // explicit fallback so we know it worked
       setTimeout(() => setImportMessage(''), 6000);
@@ -641,7 +659,16 @@ export function TrackerTable({ store }: TrackerTableProps) {
           <thead>
             <tr>
               <th>Product Name</th>
-              <th>Order Date</th>
+              <th 
+                style={{ cursor: 'pointer', userSelect: 'none' }} 
+                onClick={() => setSortOrder(prev => prev === 'desc' ? 'asc' : 'desc')}
+                title="Sort by time"
+              >
+                <div style={{ display: 'flex', alignItems: 'center', gap: '0.25rem' }}>
+                  Order Date
+                  <ArrowUpDown size={12} style={{ opacity: 0.5 }} />
+                </div>
+              </th>
               <th>Delivery Date</th>
               <th>Status</th>
               <th>Return Period</th>

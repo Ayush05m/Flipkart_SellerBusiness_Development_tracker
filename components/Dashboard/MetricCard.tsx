@@ -1,5 +1,5 @@
 import type { ElementType } from 'react';
-import { TrendingUp, TrendingDown } from 'lucide-react';
+import { TrendingUp, TrendingDown, Info } from 'lucide-react';
 
 interface MetricCardProps {
   title: string;
@@ -10,6 +10,7 @@ interface MetricCardProps {
   trendLabel?: string;
   colorClass?: string;
   onClick?: () => void;
+  tooltip?: string;
 }
 
 export function MetricCard({
@@ -21,18 +22,32 @@ export function MetricCard({
   trendLabel = 'vs last month',
   colorClass = 'text-accent',
   onClick,
+  tooltip,
 }: MetricCardProps) {
   const isPositive = trend >= 0;
 
   return (
-    <div 
+    <div
       className={`metric-card glass-panel animate-fade-in ${onClick ? 'cursor-pointer hover-scale' : ''}`}
       onClick={onClick}
       style={onClick ? { cursor: 'pointer' } : undefined}
     >
       <div className="metric-header flex-between">
-        <h3 className="metric-title">{title}</h3>
-        <div className={`metric-icon-wrapper ${colorClass}`}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', minWidth: 0 }}>
+          <h3 className="metric-title" style={{ margin: 0 }}>{title}</h3>
+          {tooltip && (
+            <div className="metric-tooltip-wrapper" style={{ position: 'relative', flexShrink: 0 }}>
+              <Info
+                size={13}
+                style={{ color: 'var(--text-tertiary)', cursor: 'help', display: 'block' }}
+              />
+              <div className="metric-tooltip-bubble">
+                {tooltip}
+              </div>
+            </div>
+          )}
+        </div>
+        <div className={`metric-icon-wrapper ${colorClass}`} style={{ flexShrink: 0 }}>
           <Icon size={20} />
         </div>
       </div>

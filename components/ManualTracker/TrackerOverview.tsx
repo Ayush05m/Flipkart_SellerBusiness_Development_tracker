@@ -328,7 +328,7 @@ export function TrackerOverview() {
                 <div className="metric-tooltip-wrapper" style={{ position: 'relative' }}>
                   <Info size={13} style={{ color: 'var(--text-tertiary)', cursor: 'help', display: 'block' }} />
                   <div className="metric-tooltip-bubble">
-                    The total amount you have manually logged as received from Flipkart payouts.{"\n\n"}Click "Log Payment" when you receive a bank transfer from Flipkart.
+                    The total amount you have manually logged as received from Flipkart payouts.{"\n\n"}Click &quot;Log Payment&quot; when you receive a bank transfer from Flipkart.
                   </div>
                 </div>
               </div>

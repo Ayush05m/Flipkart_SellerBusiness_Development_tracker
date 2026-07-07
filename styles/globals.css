@@ -396,6 +396,51 @@ button {
   color: var(--text-secondary);
 }
 
+/* ── Metric Card Tooltip ─────────────────────────────── */
+.metric-tooltip-wrapper {
+  display: inline-flex;
+  align-items: center;
+}
+
+.metric-tooltip-wrapper:hover .metric-tooltip-bubble {
+  opacity: 1;
+  transform: translateY(0);
+  pointer-events: auto;
+}
+
+.metric-tooltip-bubble {
+  position: absolute;
+  bottom: calc(100% + 10px);
+  left: 50%;
+  transform: translateX(-50%) translateY(4px);
+  background: rgba(15, 15, 25, 0.97);
+  border: 1px solid rgba(99, 102, 241, 0.3);
+  color: var(--text-primary);
+  font-size: 0.75rem;
+  line-height: 1.55;
+  font-weight: 400;
+  padding: 0.6rem 0.85rem;
+  border-radius: 10px;
+  white-space: pre-line;
+  width: 230px;
+  z-index: 999;
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 0.18s ease, transform 0.18s ease;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.5), 0 0 0 1px rgba(99,102,241,0.1);
+  backdrop-filter: blur(12px);
+}
+
+.metric-tooltip-bubble::after {
+  content: '';
+  position: absolute;
+  top: 100%;
+  left: 50%;
+  transform: translateX(-50%);
+  border: 6px solid transparent;
+  border-top-color: rgba(15, 15, 25, 0.97);
+}
+
 .metric-icon-wrapper {
   width: 40px;
   height: 40px;

@@ -23,6 +23,7 @@ import {
   Banknote,
   CircleDollarSign,
   CheckCircle2,
+  Info,
 } from 'lucide-react';
 import { MetricCard } from '../Dashboard/MetricCard';
 import { ProfitTrendChart } from '../Charts/ProfitTrendChart';
@@ -103,6 +104,7 @@ export function TrackerOverview() {
           icon={IndianRupee}
           colorClass="text-info"
           trendLabel={`${metrics.deliveredOrders + metrics.returnPeriodOngoingOrders} orders`}
+          tooltip={"Sum of Selling Price across all non-returned orders.\n\nIncludes: In Transit, Return Window & Secured orders.\nExcludes: Returned orders (sale cancelled).\n\nFormula: Σ sellingPrice"}
         />
         <MetricCard
           title="Net Profit"
@@ -111,6 +113,7 @@ export function TrackerOverview() {
           icon={Wallet}
           colorClass={metrics.netProfit >= 0 ? 'text-success' : 'text-danger'}
           trendLabel="margin %"
+          tooltip={"Your overall P&L across all order states.\n\nFormula:\nSecured Profit\n+ At-Risk Profit\n− Return Losses\n\nMargin % = Net Profit ÷ Gross Revenue × 100"}
         />
         <MetricCard
           title="GST & Taxes"
@@ -119,6 +122,7 @@ export function TrackerOverview() {
           icon={Receipt}
           colorClass="text-warning"
           trendLabel="SP − settlement deductions"
+          tooltip={"Total tax/fee deductions Flipkart withholds before crediting you.\n\nFormula per order:\nSelling Price − Settlement Price\n\nOnly counted for non-returned orders where you received (or expect) a settlement."}
         />
         <MetricCard
           title="Return Losses"
@@ -127,6 +131,7 @@ export function TrackerOverview() {
           icon={RefreshCcw}
           colorClass="text-danger"
           trendLabel="return rate %"
+          tooltip={"Total money lost due to returns.\n\nGood Return (Sellable):\n  Loss = Reverse Shipping Fee only\n\nDamaged Return:\n  Loss = Settlement Price + Reverse Shipping Fee\n\nReturn Rate % = Returned ÷ (Delivered + Returned + Return Window) × 100"}
         />
         <MetricCard
           title="Investment Cost"
@@ -135,6 +140,7 @@ export function TrackerOverview() {
           icon={ShoppingCart}
           colorClass="text-accent"
           trendLabel="ROI %"
+          tooltip={"Total capital you have locked in active & fulfilled orders.\n\nExcludes: Good (Sellable) returns — product came back, so capital is recovered.\n\nROI % = Net Profit ÷ Investment Cost × 100"}
         />
       </div>
 
@@ -147,6 +153,7 @@ export function TrackerOverview() {
           icon={ShieldCheck}
           colorClass="text-success"
           trendLabel={`${metrics.securedOrders} orders secured`}
+          tooltip={"Profit from orders whose return window has fully closed — no returns possible.\n\nFormula per order:\nSettlement Price − Cost Price\n\nAn order is 'Secured' when: today > Delivery Date + Return Duration Days."}
         />
         <MetricCard
           title="At-Risk Profit"
@@ -155,6 +162,7 @@ export function TrackerOverview() {
           icon={AlertTriangle}
           colorClass="text-warning"
           trendLabel={`${metrics.inTransitOrders + metrics.returnPeriodOngoingOrders} orders pending`}
+          tooltip={"Expected profit from orders that could still be returned.\n\nIncludes:\n• In Transit orders (not delivered yet)\n• Return Window orders (delivered, window open)\n\nThis profit becomes Secured once the return window expires."}
         />
         {/* Additional Trackers */}
         <MetricCard
@@ -165,6 +173,7 @@ export function TrackerOverview() {
           colorClass="text-info"
           trendLabel="tracked separately"
           onClick={() => setIsSpfSheetOpen(true)}
+          tooltip={"Total amount recovered via Seller Protection Fund (SPF) claims that are marked Approved.\n\nSPF compensates you when Flipkart is at fault (e.g. lost shipment, wrong return).\n\nClick this card to view or add claims."}
         />
         <MetricCard
           title="Misc Costs"
@@ -174,6 +183,7 @@ export function TrackerOverview() {
           colorClass="text-danger"
           trendLabel="tracked separately"
           onClick={() => setIsMiscSheetOpen(true)}
+          tooltip={"Total of all miscellaneous business expenses logged manually.\n\nExamples: packaging material, storage fees, advertising spend, labelling costs.\n\nClick this card to view or add costs."}
         />
       </div>
 
@@ -284,7 +294,15 @@ export function TrackerOverview() {
           >
             <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', marginBottom: '0.4rem' }}>
               <CircleDollarSign size={15} style={{ color: 'var(--info)' }} />
-              <span style={{ fontSize: '0.75rem', color: 'var(--text-secondary)', textTransform: 'uppercase', letterSpacing: '0.04em' }}>Total Settlement Due</span>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '0.3rem' }}>
+                <span style={{ fontSize: '0.75rem', color: 'var(--text-secondary)', textTransform: 'uppercase', letterSpacing: '0.04em' }}>Total Settlement Due</span>
+                <div className="metric-tooltip-wrapper" style={{ position: 'relative' }}>
+                  <Info size={13} style={{ color: 'var(--text-tertiary)', cursor: 'help', display: 'block' }} />
+                  <div className="metric-tooltip-bubble">
+                    The exact total Flipkart owes you for all Secured orders minus any reverse shipping fees.{"\n\n"}Orders are only added here once their return window expires and they can no longer be returned.
+                  </div>
+                </div>
+              </div>
             </div>
             <div style={{ fontSize: '1.6rem', fontWeight: 800, color: 'var(--info)', lineHeight: 1 }}>
               ₹{formatAmount(metrics.totalSettlementDue)}
@@ -305,7 +323,15 @@ export function TrackerOverview() {
           >
             <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', marginBottom: '0.4rem' }}>
               <Banknote size={15} style={{ color: 'var(--success)' }} />
-              <span style={{ fontSize: '0.75rem', color: 'var(--text-secondary)', textTransform: 'uppercase', letterSpacing: '0.04em' }}>Payment Received</span>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '0.3rem' }}>
+                <span style={{ fontSize: '0.75rem', color: 'var(--text-secondary)', textTransform: 'uppercase', letterSpacing: '0.04em' }}>Payment Received</span>
+                <div className="metric-tooltip-wrapper" style={{ position: 'relative' }}>
+                  <Info size={13} style={{ color: 'var(--text-tertiary)', cursor: 'help', display: 'block' }} />
+                  <div className="metric-tooltip-bubble">
+                    The total amount you have manually logged as received from Flipkart payouts.{"\n\n"}Click "Log Payment" when you receive a bank transfer from Flipkart.
+                  </div>
+                </div>
+              </div>
             </div>
             <div style={{ fontSize: '1.6rem', fontWeight: 800, color: 'var(--success)', lineHeight: 1 }}>
               ₹{formatAmount(metrics.totalSettlementReceived)}
@@ -328,7 +354,15 @@ export function TrackerOverview() {
           >
             <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', marginBottom: '0.4rem' }}>
               <CheckCircle2 size={15} style={{ color: metrics.settlementRemaining <= 0 ? 'var(--success)' : 'var(--danger)' }} />
-              <span style={{ fontSize: '0.75rem', color: 'var(--text-secondary)', textTransform: 'uppercase', letterSpacing: '0.04em' }}>Remaining Balance</span>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '0.3rem' }}>
+                <span style={{ fontSize: '0.75rem', color: 'var(--text-secondary)', textTransform: 'uppercase', letterSpacing: '0.04em' }}>Remaining Balance</span>
+                <div className="metric-tooltip-wrapper" style={{ position: 'relative' }}>
+                  <Info size={13} style={{ color: 'var(--text-tertiary)', cursor: 'help', display: 'block' }} />
+                  <div className="metric-tooltip-bubble">
+                    The difference between what Flipkart owes you and what they have actually paid you.{"\n\n"}Formula: Total Due − Payment Received.{"\n\n"}A positive number means Flipkart still owes you money.
+                  </div>
+                </div>
+              </div>
             </div>
             <div
               style={{

@@ -105,6 +105,8 @@ export function TrackerTable({ store }: TrackerTableProps) {
   const [searchQuery, setSearchQuery] = useState('');
   const [importMessage, setImportMessage] = useState('');
   const [sortOrder, setSortOrder] = useState<'desc' | 'asc'>('desc');
+  const [pendingImportFile, setPendingImportFile] = useState<File | null>(null);
+  const [isImportModalOpen, setIsImportModalOpen] = useState(false);
 
   const filteredOrders = useMemo(() => {
     const filtered = orders.filter((order) => {
@@ -175,14 +177,16 @@ export function TrackerTable({ store }: TrackerTableProps) {
     URL.revokeObjectURL(url);
   };
 
-  const handleImportFile = async (file: File) => {
+  const executeImport = async (replace: boolean) => {
+    if (!pendingImportFile) return;
+    setIsImportModalOpen(false);
     setImportMessage('Reading file…');
     try {
       const text = await new Promise<string>((resolve, reject) => {
         const reader = new FileReader();
         reader.onload = (e) => resolve(e.target?.result as string);
         reader.onerror = () => reject(new Error('File read failed'));
-        reader.readAsText(file);
+        reader.readAsText(pendingImportFile);
       });
 
       let parsed: any;
@@ -260,26 +264,30 @@ export function TrackerTable({ store }: TrackerTableProps) {
       if (!finalOrders.length && !finalSpf.length && !finalMisc.length && !finalSettlements.length) {
         setImportMessage('No valid data found in the file.');
         alert('No valid data found in the file.');
+        setPendingImportFile(null);
         return;
       }
 
-      importData({ orders: finalOrders, spfClaims: finalSpf, miscCosts: finalMisc, settlementPayments: finalSettlements });
-      const successMsg = `✓ Imported ${finalOrders.length} orders, ${finalSpf.length} claims, ${finalMisc.length} costs, ${finalSettlements.length} payments.`;
+      importData({ orders: finalOrders, spfClaims: finalSpf, miscCosts: finalMisc, settlementPayments: finalSettlements }, replace);
+      const successMsg = `✓ ${replace ? 'Replaced with' : 'Appended'} ${finalOrders.length} orders, ${finalSpf.length} claims, ${finalMisc.length} costs, ${finalSettlements.length} payments.`;
       setImportMessage(successMsg);
       alert(successMsg); // explicit fallback so we know it worked
       setTimeout(() => setImportMessage(''), 6000);
+      setPendingImportFile(null);
     } catch (error) {
       console.error('File import error:', error);
       const errMsg = 'Import failed — unexpected error reading the file.';
       setImportMessage(errMsg);
       alert(errMsg);
+      setPendingImportFile(null);
     }
   };
 
-  const handleFileInputChange = async (event: ChangeEvent<HTMLInputElement>) => {
+  const handleFileInputChange = (event: ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
     if (!file) return;
-    await handleImportFile(file);
+    setPendingImportFile(file);
+    setIsImportModalOpen(true);
     // Reset value so the same file can be re-selected next time
     event.target.value = '';
   };
@@ -763,6 +771,37 @@ export function TrackerTable({ store }: TrackerTableProps) {
           </tbody>
         </table>
       </div>
+
+      {/* Import Choice Modal */}
+      <Modal
+        isOpen={isImportModalOpen}
+        onClose={() => { setIsImportModalOpen(false); setPendingImportFile(null); }}
+        title="Import Data"
+      >
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem', padding: '1rem 0' }}>
+          <p style={{ color: 'var(--text-secondary)', fontSize: '0.95rem' }}>
+            How would you like to import <strong>{pendingImportFile?.name}</strong>?
+          </p>
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1rem' }}>
+            <button
+              className="icon-action-btn"
+              onClick={() => executeImport(true)}
+              style={{ color: 'white', background: 'rgba(239, 68, 68, 0.1)', borderColor: 'var(--danger)', padding: '1rem', height: 'auto', flexDirection: 'column', gap: '0.5rem', alignItems: 'flex-start', textAlign: 'left' }}
+            >
+              <strong style={{ color: 'var(--danger)' }}>Replace Completely</strong>
+              <span style={{ fontSize: '0.8rem', color: 'var(--text-secondary)' }}>Deletes all existing data and loads only the data from this file.</span>
+            </button>
+            <button
+              className="icon-action-btn"
+              onClick={() => executeImport(false)}
+              style={{ color: 'white', background: 'var(--accent-primary)', borderColor: 'var(--accent-primary)', padding: '1rem', height: 'auto', flexDirection: 'column', gap: '0.5rem', alignItems: 'flex-start', textAlign: 'left' }}
+            >
+              <strong>Append / Update</strong>
+              <span style={{ fontSize: '0.8rem', color: 'rgba(255,255,255,0.8)' }}>Merges the file with existing data.</span>
+            </button>
+          </div>
+        </div>
+      </Modal>
 
       {/* Add Order Modal */}
       <Modal 

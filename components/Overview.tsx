@@ -29,6 +29,7 @@ export function Overview() {
           trend={dashboardData.metrics[0].trend}
           icon={IndianRupee}
           colorClass="text-info"
+          tooltip={"Total sales generated before any deductions or fees.\n\nFormula: Σ Selling Price of all fulfilled orders."}
         />
         <MetricCard
           title="Net Profit"
@@ -36,6 +37,7 @@ export function Overview() {
           trend={dashboardData.metrics[1].trend}
           icon={Wallet}
           colorClass="text-success"
+          tooltip={"Your actual take-home profit after subtracting all fees, return losses, and product costs.\n\nFormula: Settlement Amount − Cost Price − Return Losses."}
         />
         <MetricCard
           title="Total Fees"
@@ -44,6 +46,7 @@ export function Overview() {
           icon={Receipt}
           colorClass="text-warning"
           trendLabel="settlement + returns"
+          tooltip={"The combined total of all Flipkart commissions, fixed fees, collection fees, and shipping charges deducted from your settlements."}
         />
         <MetricCard
           title="Return Losses"
@@ -52,6 +55,7 @@ export function Overview() {
           icon={RefreshCcw}
           colorClass="text-danger"
           trendLabel="loss from returns"
+          tooltip={"The financial loss incurred from customer returns and courier returns.\n\nFormula: Forward shipping + Reverse shipping fees + any lost product cost (if damaged)."}
         />
         <MetricCard
           title="Investment Cost"
@@ -60,6 +64,7 @@ export function Overview() {
           icon={ShoppingCart}
           colorClass="text-accent"
           trendLabel="total cost price"
+          tooltip={"The total base cost of the goods you have sold.\n\nFormula: Σ Cost Price of all fulfilled non-returned products."}
         />
       </div>
 

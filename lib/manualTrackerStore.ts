@@ -222,7 +222,16 @@ export function useManualTracker() {
     });
   }, []);
 
-  const importData = useCallback((payload: { orders?: ManualOrder[], spfClaims?: SpfClaim[], miscCosts?: MiscCost[], settlementPayments?: SettlementPayment[] }) => {
+  const importData = useCallback((payload: { orders?: ManualOrder[], spfClaims?: SpfClaim[], miscCosts?: MiscCost[], settlementPayments?: SettlementPayment[] }, replace?: boolean) => {
+    if (replace) {
+      if (payload.orders) setOrders([...payload.orders].sort((a, b) => new Date(b.orderDate).getTime() - new Date(a.orderDate).getTime()));
+      if (payload.spfClaims) setSpfClaims(payload.spfClaims);
+      if (payload.miscCosts) setMiscCosts(payload.miscCosts);
+      if (payload.settlementPayments) setSettlementPayments(payload.settlementPayments);
+      return;
+    }
+
+    // Merge orders (deduplicate by id)
     if (payload.orders && payload.orders.length > 0) {
       importOrders(payload.orders);
     }
@@ -429,6 +438,9 @@ export function useManualTracker() {
       { name: 'Secured Profit', value: Math.max(securedProfit, 0) },
       { name: 'At-Risk Profit', value: Math.max(atRiskProfit, 0) },
     ];
+
+    // Deduct reverse shipping fees directly from what Flipkart owes the seller
+    totalSettlementDue -= reverseShippingTotal;
 
     const settlementRemaining = totalSettlementDue - totalSettlementReceived;
 
